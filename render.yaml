@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: b2b-supply-chain-portal
+    runtime: python
+    region: frankfurt
+    plan: free
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn portal_core.wsgi:application --bind 0.0.0.0:$PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.8
