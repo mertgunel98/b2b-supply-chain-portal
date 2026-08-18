@@ -679,7 +679,9 @@
         ? `<span class="badge badge-healthy">🟢 In Stock: ${item.current_stock} ${item.product.unit}</span>`
         : `<span class="badge badge-critical">🔴 Out of Stock</span>`;
 
-      const supplierId = item.product.preferred_supplier || (item.company ? item.company.id : 14);
+      const supplierId = (typeof item.company === 'object' ? item.company?.id : item.company) || item.product.preferred_supplier || 14;
+      const supplierName = item.company_name || (item.company && item.company.name) || item.product.preferred_supplier_name || 'Verified Supplier';
+      const effectivePrice = item.unit_price ? parseFloat(item.unit_price) : parseFloat(item.product.unit_price);
 
       return `
         <div class="card-section" style="display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); border-radius: 14px; background: rgba(30, 41, 59, 0.6); transition: all 0.2s ease; padding: 20px; position: relative;">
@@ -701,7 +703,7 @@
                 Supplied By Verified Vendor
               </div>
               <strong style="color: #60A5FA; font-size: 0.88rem; display: flex; align-items: center; gap: 4px;">
-                🏭 ${item.product.preferred_supplier_name || 'Verified Supplier'}
+                🏭 ${supplierName}
               </strong>
               <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 2px;">
                 📍 ${item.warehouse_location || 'Central Depot'}
@@ -713,7 +715,7 @@
             <div>
               <span style="font-size: 0.7rem; color: var(--text-muted); display: block;">Unit Price</span>
               <strong style="font-size: 1.3rem; font-weight: 800; color: #34D399;">
-                $${parseFloat(item.product.unit_price).toFixed(2)}
+                $${effectivePrice.toFixed(2)}
               </strong>
               <span style="font-size: 0.72rem; color: var(--text-muted);">/ ${item.product.unit}</span>
             </div>
@@ -1477,7 +1479,7 @@
       qtyInput.min = 1;
     }
 
-    const unitPrice = parseFloat(prod.unit_price || 0);
+    const unitPrice = (invItem && invItem.unit_price) ? parseFloat(invItem.unit_price) : parseFloat(prod.unit_price || 0);
     const qty = parseInt(qtyInput?.value || 1);
     const totalAmount = unitPrice * qty;
 
@@ -2239,6 +2241,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const poNumber = `PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const agreedUnitPrice = (invItem && invItem.unit_price) ? parseFloat(invItem.unit_price) : (prod ? parseFloat(prod.unit_price) : 10.00);
 
       const orderPayload = {
         order_number: poNumber,
@@ -2247,7 +2250,7 @@ document.addEventListener('DOMContentLoaded', () => {
         supplier_company: supplierId,
         status: 'PENDING_SUPPLIER',
         notes: document.getElementById('orderNotes')?.value || '',
-        items: [{ product_id: prodId, quantity_requested: qty, agreed_unit_price: prod ? prod.unit_price : 10.00 }]
+        items: [{ product_id: prodId, quantity_requested: qty, agreed_unit_price: agreedUnitPrice }]
       };
 
       try {

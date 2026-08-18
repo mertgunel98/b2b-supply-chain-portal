@@ -152,12 +152,47 @@ def run_seed():
         InventoryItem.objects.create(
             product=prod,
             company=sup,
+            unit_price=price,
             current_stock=stock,
             critical_threshold=threshold,
             reorder_quantity=threshold * 4,
             warehouse_location=loc
         )
         created_products.append(prod)
+
+    # 5.2 Multi-Vendor Competitive Offerings (Same Products Sold by Multiple Suppliers at Different Prices & Stock)
+    competitor_offerings = [
+        # (Supplier, Product SKU, Custom Unit Price, Stock, Threshold, Location)
+        (sup1, "IC-STM32-F407", 16.20, 85, 20, "Rack E-01 (Umraniye Logistics Bay)"),
+        (sup2, "BRG-6205-2RS", 21.00, 45, 10, "Bay M-02 (Izmir Distribution Center)"),
+        (sup1, "BOX-DW-604040", 4.85, 120, 30, "Rack P-04 (Umraniye Facility)"),
+        (sup1, "ALU-6061-T6-25", 39.00, 50, 15, "Rack R-01 (Umraniye Metals Shed)"),
+        (sup1, "SSR-40A-240V", 22.50, 35, 10, "Bay E-03 (Umraniye Central)"),
+        (sup2, "MOT-NEMA23-28", 52.50, 40, 12, "Bay M-05 (Izmir Electronics Hub)"),
+        (sup1, "STR-MCH-23MIC", 56.00, 30, 10, "Rack P-02 (Umraniye Facility)"),
+        (sup2, "LBL-TH-100150", 11.00, 80, 20, "Bay P-01 (Izmir Distribution Center)"),
+        (sup1, "RAW-HDPE-25KG", 51.50, 40, 10, "Rack R-02 (Umraniye Facility)"),
+        (sup1, "PSU-DIN-24V10A", 64.00, 25, 8, "Bay E-04 (Umraniye Central)"),
+        (sup1, "STL-CK45-161000", 28.50, 60, 15, "Rack R-03 (Umraniye Facility)"),
+        (sup1, "BTN-ESTOP-2NC", 13.00, 55, 15, "Bay E-09 (Umraniye Central)"),
+        (sup2, "LGR-20-1000", 122.00, 20, 5, "Bay M-01 (Izmir Distribution Center)"),
+        (sup3, "BRG-6205-2RS", 19.90, 70, 15, "Shed M-01 (Demirtas Facility)"),
+        (sup2, "BBL-ESD-100M", 42.00, 50, 15, "Bay P-02 (Izmir Distribution Center)"),
+        (sup1, "PLT-EURO-EPAL1", 23.50, 60, 15, "Rack P-01 (Umraniye Facility)")
+    ]
+
+    for sup, sku, comp_price, stock, threshold, loc in competitor_offerings:
+        prod = Product.objects.filter(sku=sku).first()
+        if prod:
+            InventoryItem.objects.create(
+                product=prod,
+                company=sup,
+                unit_price=comp_price,
+                current_stock=stock,
+                critical_threshold=threshold,
+                reorder_quantity=threshold * 4,
+                warehouse_location=loc
+            )
 
     # 6. Create Realistic Purchase Orders with Evaluation Histories
     p1 = created_products[0]

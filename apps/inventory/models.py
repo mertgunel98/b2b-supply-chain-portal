@@ -41,6 +41,7 @@ class InventoryItem(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='inventory_items')
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='inventory_entries')
     current_stock = models.IntegerField(default=0)
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True, help_text="Supplier-specific selling price")
     critical_threshold = models.IntegerField(default=20, help_text="Triggers critical stock alert if current stock <= threshold")
     reorder_quantity = models.IntegerField(default=100, help_text="Standard replenishment quantity")
     warehouse_location = models.CharField(max_length=100, default='Main Warehouse - Bay A', blank=True)

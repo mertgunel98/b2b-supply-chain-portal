@@ -37,7 +37,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         model = InventoryItem
         fields = [
             'id', 'company', 'company_name', 'product', 'product_id',
-            'current_stock', 'critical_threshold', 'reorder_quantity',
+            'current_stock', 'unit_price', 'critical_threshold', 'reorder_quantity',
             'warehouse_location', 'last_restocked_at', 'is_critical',
             'stock_health_status', 'stockout_risk_percentage'
         ]
