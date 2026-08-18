@@ -214,7 +214,15 @@
     window.AppState.currentUser = user;
     window.showAuthOverlay(false);
     window.applyUserRoleLayout(user);
-    window.loadAllData();
+    window.loadAllData().then(() => {
+      if (window.pendingBuyProduct) {
+        const p = window.pendingBuyProduct;
+        window.pendingBuyProduct = null;
+        setTimeout(() => {
+          window.openOrderModalWithProduct(p.productId, p.supplierId);
+        }, 200);
+      }
+    });
   };
 
   window.initUserSession = async function() {
@@ -650,23 +658,27 @@
         ? `<span class="badge badge-healthy">🟢 In Stock: ${item.current_stock} ${item.product.unit}</span>`
         : `<span class="badge badge-critical">🔴 Out of Stock</span>`;
 
-      const supplierId = (typeof item.company === 'object' ? item.company?.id : item.company) || item.product.preferred_supplier || 14;
-      const supplierName = item.company_name || (item.company && item.company.name) || item.product.preferred_supplier_name || 'Verified Supplier';
-      const effectivePrice = item.unit_price ? parseFloat(item.unit_price) : parseFloat(item.product.unit_price);
+      const prodId = item.product?.id || item.product;
+      const supplierId = (typeof item.company === 'object' ? item.company?.id : item.company) || item.product?.preferred_supplier || 14;
+      const supplierName = item.company_name || (item.company && item.company.name) || item.product?.preferred_supplier_name || 'Verified Supplier';
+      const effectivePrice = item.unit_price ? parseFloat(item.unit_price) : parseFloat(item.product?.unit_price || 10.00);
+      const prodUnit = item.product?.unit || 'Pieces';
+      const prodName = item.product?.name || 'Industrial Material';
+      const prodSku = item.product?.sku || 'SKU-000';
 
       return `
         <div class="card-section" style="display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); border-radius: 14px; background: rgba(30, 41, 59, 0.6); transition: all 0.2s ease; padding: 20px; position: relative;">
           <div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-              <span class="badge badge-silver" style="font-size: 0.72rem;">${item.product.category_name || 'General Part'}</span>
+              <span class="badge badge-silver" style="font-size: 0.72rem;">${item.product?.category_name || 'General Part'}</span>
               ${stockBadge}
             </div>
 
             <h3 style="font-size: 1.15rem; font-weight: 700; color: #F8FAFC; margin-bottom: 4px; line-height: 1.3;">
-              ${item.product.name}
+              ${prodName}
             </h3>
             <span style="font-family: monospace; font-size: 0.75rem; color: #94A3B8; display: block; margin-bottom: 14px;">
-              SKU: ${item.product.sku}
+              SKU: ${prodSku}
             </span>
 
             <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px;">
@@ -688,10 +700,10 @@
               <strong style="font-size: 1.3rem; font-weight: 800; color: #34D399;">
                 $${effectivePrice.toFixed(2)}
               </strong>
-              <span style="font-size: 0.72rem; color: var(--text-muted);">/ ${item.product.unit}</span>
+              <span style="font-size: 0.72rem; color: var(--text-muted);">/ ${prodUnit}</span>
             </div>
 
-            <button class="btn btn-primary" style="padding: 9px 16px; font-size: 0.88rem;" onclick="window.openOrderModalWithProduct(${item.product.id}, ${supplierId})">
+            <button type="button" class="btn btn-primary" style="padding: 9px 16px; font-size: 0.88rem; cursor: pointer;" onclick="window.openOrderModalWithProduct(${prodId}, ${supplierId})">
               🛒 Buy / Satın Al
             </button>
           </div>
@@ -1423,40 +1435,56 @@
   };
 
   window.openOrderModalWithProduct = function(productId, supplierId) {
+    const targetId = parseInt(productId);
+    const targetSupId = parseInt(supplierId);
+
     if (!window.AppState.currentUser) {
-      window.showToast('Sipariş vermek için lütfen önce giriş yapın.', 'info');
+      window.pendingBuyProduct = { productId: targetId, supplierId: targetSupId };
+      window.showToast('Sipariş verebilmek için lütfen Alıcı (Buyer) olarak giriş yapın.', 'info');
       window.showAuthOverlay(true);
       return;
     }
 
-    const isSupplier = window.AppState.currentUser.company?.company_type === 'SUPPLIER';
+    const isSupplier = window.AppState.currentUser?.company?.company_type === 'SUPPLIER';
     if (isSupplier) {
-      window.showToast('Tedarikçi hesabı ile malzeme satın alınamaz. Satın alma işlemi için lütfen bir Alıcı (Buyer) hesabı ile giriş yapın.', 'warning');
+      window.showToast('Tedarikçi hesapları malzeme satın alamaz. Satın alma işlemi için lütfen Alıcı (Buyer) hesabıyla giriş yapın.', 'warning');
       return;
     }
 
-    const prod = window.AppState.products.find(p => parseInt(p.id) === parseInt(productId)) ||
-                 (window.AppState.inventory.find(i => parseInt(i.product.id || i.product) === parseInt(productId))?.product);
+    let prod = null;
+    if (window.AppState.products && window.AppState.products.length > 0) {
+      prod = window.AppState.products.find(p => parseInt(p.id) === targetId);
+    }
+    if (!prod && window.AppState.inventory && window.AppState.inventory.length > 0) {
+      const inv = window.AppState.inventory.find(i => parseInt(i.product?.id || i.product) === targetId);
+      if (inv) {
+        prod = typeof inv.product === 'object' ? inv.product : { id: targetId, name: 'Industrial Material', sku: 'SKU', unit: 'Pieces', unit_price: inv.unit_price || 10.00 };
+      }
+    }
 
     if (!prod) {
-      window.showToast('Ürün bilgisi yüklenemedi.', 'danger');
+      window.showToast('Ürün detayları yüklenemedi.', 'danger');
       return;
     }
 
     const prodSelect = document.getElementById('orderProductSelect');
     if (prodSelect) {
-      prodSelect.innerHTML = `<option value="${prod.id}" selected>${prod.name} (${prod.sku})</option>`;
+      prodSelect.innerHTML = `<option value="${prod.id}" selected>${prod.name} (${prod.sku || 'SKU'})</option>`;
       prodSelect.value = prod.id;
     }
 
-    // Default quantity to 1
     const qtyInput = document.getElementById('orderQuantity');
     if (qtyInput) {
       qtyInput.value = 1;
     }
 
-    window.openModal('newOrderModal', false);
-    window.refreshOrderModalDetails(productId, supplierId);
+    const modalEl = document.getElementById('newOrderModal');
+    if (modalEl) {
+      modalEl.classList.add('show');
+      modalEl.style.display = 'flex';
+    }
+
+    window.refreshOrderModalDetails(targetId, targetSupId);
   };
 
   window.refreshOrderModalDetails = function(targetProdId = null, targetSupplierId = null) {
