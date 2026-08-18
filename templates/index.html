@@ -1416,7 +1416,7 @@
       }
     }
 
-    if (modalId === 'newOrderModal') {
+    if (modalId === 'newOrderModal' && populateProducts) {
       const prodSelect = document.getElementById('orderProductSelect');
       if (prodSelect) {
         prodSelect.innerHTML = window.AppState.products.map(p => `<option value="${p.id}">${p.name} ($${parseFloat(p.unit_price).toFixed(2)})</option>`).join('');
@@ -1434,11 +1434,13 @@
   };
 
   window.openOrderModalWithProduct = function(productId, supplierId) {
-    window.openModal('newOrderModal');
+    const prod = window.AppState.products.find(p => p.id === productId);
     const prodSelect = document.getElementById('orderProductSelect');
-    if (prodSelect) {
-      prodSelect.value = productId;
+    if (prodSelect && prod) {
+      prodSelect.innerHTML = `<option value="${prod.id}" selected>${prod.name} (${prod.sku})</option>`;
+      prodSelect.value = prod.id;
     }
+    window.openModal('newOrderModal', false);
     window.refreshOrderModalDetails(productId, supplierId);
   };
 
