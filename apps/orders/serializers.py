@@ -51,6 +51,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
 
         order = PurchaseOrder.objects.create(**validated_data)
         
+        from apps.inventory.models import InventoryItem
         for item_data in items_data:
             if isinstance(item_data, dict):
                 product_id = item_data.get('product_id') or item_data.get('product')
@@ -65,5 +66,17 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
                     quantity_requested=qty,
                     agreed_unit_price=unit_price
                 )
+
+                # DEDUCT STOCK FROM SUPPLIER INVENTORY
+                supplier_inv = InventoryItem.objects.filter(
+                    product=product,
+                    company=order.supplier_company
+                ).first()
+                if not supplier_inv:
+                    supplier_inv = InventoryItem.objects.filter(product=product).first()
+                if supplier_inv:
+                    supplier_inv.current_stock = max(0, supplier_inv.current_stock - qty)
+                    supplier_inv.save()
+
         order.calculate_total()
         return order

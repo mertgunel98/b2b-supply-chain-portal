@@ -32,20 +32,29 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if new_status not in dict(PurchaseOrder.STATUS_CHOICES):
             return Response({'error': f'Invalid status: {new_status}'}, status=status.HTTP_400_BAD_REQUEST)
 
+        old_status = order.status
         order.status = new_status
-        if new_status == 'DELIVERED' and not order.actual_delivery_date:
-            order.actual_delivery_date = timezone.now().date()
-            # Update inventory automatically upon delivery!
+
+        # If order is delivered, set actual delivery date and mark received quantities
+        if new_status == 'DELIVERED':
+            if not order.actual_delivery_date:
+                order.actual_delivery_date = timezone.now().date()
             for item in order.items.all():
-                inv, _ = InventoryItem.objects.get_or_create(
-                    company=order.buyer_company,
-                    product=item.product,
-                    defaults={'critical_threshold': 20, 'reorder_quantity': 100}
-                )
-                inv.current_stock += item.quantity_requested
                 item.quantity_received = item.quantity_requested
                 item.save()
-                inv.save()
+
+        # If order is rejected or cancelled, restore deducted stock back to the supplier
+        elif new_status in ['REJECTED_BY_SUPPLIER', 'REJECTED_BY_BUYER', 'CANCELLED'] and old_status not in ['REJECTED_BY_SUPPLIER', 'REJECTED_BY_BUYER', 'CANCELLED']:
+            for item in order.items.all():
+                supplier_inv = InventoryItem.objects.filter(
+                    product=item.product,
+                    company=order.supplier_company
+                ).first()
+                if not supplier_inv:
+                    supplier_inv = InventoryItem.objects.filter(product=item.product).first()
+                if supplier_inv:
+                    supplier_inv.current_stock += item.quantity_requested
+                    supplier_inv.save()
 
         order.save()
         return Response({

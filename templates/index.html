@@ -639,7 +639,11 @@
     const gridContainer = document.getElementById('marketplaceGridContainer');
     if (!gridContainer) return;
 
-    let items = window.AppState.inventory;
+    let items = window.AppState.inventory.filter(i => {
+      const compType = i.company?.company_type;
+      return compType === 'SUPPLIER' || (i.company && i.product && parseInt(i.company.id || i.company) === parseInt(i.product.preferred_supplier));
+    });
+
     const catFilter = document.getElementById('marketCategoryFilter')?.value || 'ALL';
     const supFilter = document.getElementById('marketSupplierFilter')?.value || 'ALL';
     const query = (document.getElementById('marketSearchInput')?.value || '').toLowerCase().trim();
@@ -1129,7 +1133,9 @@
       if (res.ok) {
         window.showToast('Sipariş alıcı tarafından iptal edildi / reddedildi.', 'warning');
         await window.fetchOrders();
+        await window.fetchInventory();
         window.renderDashboard();
+        window.renderMarketplace();
         window.renderOrdersTable();
       } else {
         window.showToast(data.error || 'İptal işlemi gerçekleştirilemedi.', 'danger');
@@ -1153,7 +1159,9 @@
       if (res.ok) {
         window.showToast('Sipariş tedarikçi tarafından reddedildi / geri çevrildi.', 'warning');
         await window.fetchOrders();
+        await window.fetchInventory();
         window.renderDashboard();
+        window.renderMarketplace();
         window.renderOrdersTable();
       } else {
         window.showToast(data.error || 'İşlem gerçekleştirilemedi.', 'danger');
@@ -2193,7 +2201,11 @@ document.addEventListener('DOMContentLoaded', () => {
           window.showToast(`Order ${poNumber} sent to ${supplierName}! Awaiting supplier confirmation.`, 'success');
           window.closeModal('newOrderModal');
           await window.fetchOrders();
+          await window.fetchInventory();
+          await window.fetchProducts();
           window.renderDashboard();
+          window.renderMarketplace();
+          window.renderMyStockTable();
           window.renderOrdersTable();
           window.switchTab('orders');
         } else {
