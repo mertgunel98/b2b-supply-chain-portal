@@ -15,6 +15,7 @@ from apps.accounts.models import Company
 class PurchaseOrderViewSet(viewsets.ModelViewSet):
     queryset = PurchaseOrder.objects.select_related('buyer_company', 'supplier_company').prefetch_related('items__product', 'invoice').all()
     serializer_class = PurchaseOrderSerializer
+    pagination_class = None
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
@@ -186,6 +187,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 class InvoiceViewSet(viewsets.ModelViewSet):
     queryset = Invoice.objects.select_related('order', 'order__buyer_company', 'order__supplier_company').all()
     serializer_class = InvoiceSerializer
+    pagination_class = None
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):

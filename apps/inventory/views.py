@@ -8,10 +8,12 @@ from .serializers import CategorySerializer, ProductSerializer, InventoryItemSer
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
+    pagination_class = None
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.select_related('category', 'preferred_supplier').all()
     serializer_class = ProductSerializer
+    pagination_class = None
 
     def create(self, request, *args, **kwargs):
         if request.user.is_authenticated and hasattr(request.user, 'profile'):
@@ -22,6 +24,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 class InventoryItemViewSet(viewsets.ModelViewSet):
     queryset = InventoryItem.objects.select_related('company', 'product', 'product__category', 'product__preferred_supplier').all()
     serializer_class = InventoryItemSerializer
+    pagination_class = None
 
     def create(self, request, *args, **kwargs):
         if request.user.is_authenticated and hasattr(request.user, 'profile'):
