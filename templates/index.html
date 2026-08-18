@@ -618,35 +618,49 @@
     const gridContainer = document.getElementById('marketplaceGridContainer');
     if (!gridContainer) return;
 
-    let items = window.AppState.inventory.filter(i => {
-      const compType = i.company?.company_type;
-      return compType === 'SUPPLIER' || (i.company && i.product && parseInt(i.company.id || i.company) === parseInt(i.product.preferred_supplier));
-    });
+    // All active inventory items across all suppliers in the B2B network
+    let items = (window.AppState.inventory || []).slice();
 
     const catFilter = document.getElementById('marketCategoryFilter')?.value || 'ALL';
     const supFilter = document.getElementById('marketSupplierFilter')?.value || 'ALL';
     const query = (document.getElementById('marketSearchInput')?.value || '').toLowerCase().trim();
 
+    // 1. Filter by Category (matches ID or category name)
     if (catFilter !== 'ALL') {
-      items = items.filter(i => i.product.category == catFilter);
+      items = items.filter(i => {
+        const catId = i.product?.category?.id || i.product?.category;
+        const catName = (i.product?.category_name || '').toLowerCase();
+        return String(catId) === String(catFilter) || catName.includes(catFilter.toLowerCase());
+      });
     }
+
+    // 2. Filter by Supplying Company (actual selling company holding the stock)
     if (supFilter !== 'ALL') {
-      items = items.filter(i => i.product.preferred_supplier == supFilter);
+      items = items.filter(i => {
+        const itemCompId = i.company?.id || i.company;
+        const prefSupId = i.product?.preferred_supplier;
+        return String(itemCompId) === String(supFilter) || String(prefSupId) === String(supFilter);
+      });
     }
+
+    // 3. Search Keyword (matches product name, SKU, category name, supplier company, location)
     if (query) {
-      items = items.filter(i => 
-        i.product.name.toLowerCase().includes(query) || 
-        i.product.sku.toLowerCase().includes(query) || 
-        (i.product.preferred_supplier_name && i.product.preferred_supplier_name.toLowerCase().includes(query))
-      );
+      items = items.filter(i => {
+        const name = (i.product?.name || '').toLowerCase();
+        const sku = (i.product?.sku || '').toLowerCase();
+        const catName = (i.product?.category_name || '').toLowerCase();
+        const supName = (i.company_name || (i.company && i.company.name) || i.product?.preferred_supplier_name || '').toLowerCase();
+        const location = (i.warehouse_location || '').toLowerCase();
+        return name.includes(query) || sku.includes(query) || catName.includes(query) || supName.includes(query) || location.includes(query);
+      });
     }
 
     if (items.length === 0) {
       gridContainer.innerHTML = `
         <div style="grid-column: 1 / -1; text-align: center; padding: 50px 20px; background: var(--bg-card); border-radius: 12px; border: 1px dashed var(--border-subtle);">
           <div style="font-size: 2.5rem; margin-bottom: 8px;">🔍</div>
-          <h3 style="font-size: 1.1rem; color: var(--text-primary);">No materials found matching your filters</h3>
-          <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Try clearing search keywords or selecting all categories.</p>
+          <h3 style="font-size: 1.1rem; color: var(--text-primary);">Arama Kriterlerine Uygun Malzeme Bulunamadı</h3>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Farklı bir kategori, tedarikçi veya arama kelimesi seçmeyi deneyin.</p>
         </div>
       `;
       return;
