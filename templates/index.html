@@ -23,16 +23,7 @@
   } catch (e) {}
 
   if (!initialUser) {
-    initialUser = {
-      id: 2,
-      username: "buyer_apex",
-      company: {
-        id: 13,
-        name: "Apex Precision Manufacturing Ltd.",
-        company_type: "SME"
-      },
-      role_title: "Head of Supply Chain"
-    };
+    initialUser = null;
   }
 
   window.AppState = {
@@ -235,38 +226,56 @@
   };
 
   window.initUserSession = async function() {
-    window.showAuthOverlay(false);
+    let loggedInUser = null;
 
-    // 1. First apply cached user immediately so layout updates without lag
+    // 1. Check cached user from localStorage
     const savedUserJson = localStorage.getItem('portal_current_user');
     if (savedUserJson) {
       try {
-        const cachedUser = JSON.parse(savedUserJson);
-        window.AppState.currentUser = cachedUser;
-        window.applyUserRoleLayout(cachedUser);
+        loggedInUser = JSON.parse(savedUserJson);
       } catch (e) {}
     }
 
-    // 2. Refresh from backend session if active
+    // 2. Check backend session
     try {
       const res = await fetch(`${API_BASE}/accounts/auth/me/`);
       const data = await res.json();
       if (data.authenticated && data.user) {
-        window.AppState.currentUser = data.user;
-        try {
-          localStorage.setItem('portal_current_user', JSON.stringify(data.user));
-        } catch (e) {}
-        window.applyUserRoleLayout(data.user);
+        loggedInUser = data.user;
       }
     } catch (e) {}
 
-    window.applyUserRoleLayout(window.AppState.currentUser);
+    // 3. If NOT logged in, show the Login/Register overlay
+    if (!loggedInUser) {
+      window.AppState.currentUser = null;
+      window.showAuthOverlay(true);
+      await window.loadAllData();
+      return;
+    }
+
+    // 4. If logged in, restore session smoothly
+    window.AppState.currentUser = loggedInUser;
+    try {
+      localStorage.setItem('portal_current_user', JSON.stringify(loggedInUser));
+    } catch (e) {}
     window.showAuthOverlay(false);
+    window.applyUserRoleLayout(loggedInUser);
     await window.loadAllData();
   };
 
   window.applyUserRoleLayout = function(user) {
-    if (!user) return;
+    if (!user) {
+      const elCompTitle = document.getElementById('headerCompanyTitle');
+      if (elCompTitle) elCompTitle.innerText = 'B2B Enterprise Portal';
+      const elTopComp = document.getElementById('topbarCompanyName');
+      if (elTopComp) elTopComp.innerText = 'Guest Session';
+      const roleBadge = document.getElementById('topbarRoleBadge');
+      if (roleBadge) {
+        roleBadge.innerText = '🔒 Please Sign In';
+        roleBadge.style.color = '#94A3B8';
+      }
+      return;
+    }
     const isSme = user.company ? (user.company.company_type === 'SME' || user.company.company_type === 'BUYER') : true;
     const companyName = user.company ? user.company.name : 'Enterprise';
     
