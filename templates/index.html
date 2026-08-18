@@ -13,21 +13,14 @@
   <script>
   const API_BASE = '/api';
 
-  // Read persisted user session from localStorage if present
-  let initialUser = null;
+  // Always require fresh login when opening the application
   try {
-    const savedUserJson = localStorage.getItem('portal_current_user');
-    if (savedUserJson) {
-      initialUser = JSON.parse(savedUserJson);
-    }
+    localStorage.removeItem('portal_current_user');
+    sessionStorage.removeItem('portal_current_user');
   } catch (e) {}
 
-  if (!initialUser) {
-    initialUser = null;
-  }
-
   window.AppState = {
-    currentUser: initialUser,
+    currentUser: null,
     activeTab: 'marketplace',
     inventory: [],
     products: [],
@@ -209,57 +202,26 @@
     } catch (e) {}
     try {
       localStorage.removeItem('portal_current_user');
+      sessionStorage.removeItem('portal_current_user');
     } catch (e) {}
     window.AppState.currentUser = null;
-    window.showToast('You have signed out.', 'info');
+    window.showToast('Oturum kapatıldı.', 'info');
+    window.applyUserRoleLayout(null);
     window.showAuthOverlay(true);
   };
 
   window.handleSuccessfulAuth = function(user) {
     window.AppState.currentUser = user;
-    try {
-      localStorage.setItem('portal_current_user', JSON.stringify(user));
-    } catch (e) {}
     window.showAuthOverlay(false);
     window.applyUserRoleLayout(user);
     window.loadAllData();
   };
 
   window.initUserSession = async function() {
-    let loggedInUser = null;
-
-    // 1. Check cached user from localStorage
-    const savedUserJson = localStorage.getItem('portal_current_user');
-    if (savedUserJson) {
-      try {
-        loggedInUser = JSON.parse(savedUserJson);
-      } catch (e) {}
-    }
-
-    // 2. Check backend session
-    try {
-      const res = await fetch(`${API_BASE}/accounts/auth/me/`);
-      const data = await res.json();
-      if (data.authenticated && data.user) {
-        loggedInUser = data.user;
-      }
-    } catch (e) {}
-
-    // 3. If NOT logged in, show the Login/Register overlay
-    if (!loggedInUser) {
-      window.AppState.currentUser = null;
-      window.showAuthOverlay(true);
-      await window.loadAllData();
-      return;
-    }
-
-    // 4. If logged in, restore session smoothly
-    window.AppState.currentUser = loggedInUser;
-    try {
-      localStorage.setItem('portal_current_user', JSON.stringify(loggedInUser));
-    } catch (e) {}
-    window.showAuthOverlay(false);
-    window.applyUserRoleLayout(loggedInUser);
+    // ALWAYS prompt for login when loading or refreshing the site
+    window.AppState.currentUser = null;
+    window.showAuthOverlay(true);
+    window.applyUserRoleLayout(null);
     await window.loadAllData();
   };
 
@@ -1425,21 +1387,39 @@
       }
     }
 
-    if (modalId === 'newOrderModal' && populateProducts) {
-      const prodSelect = document.getElementById('orderProductSelect');
-      if (prodSelect) {
-        prodSelect.innerHTML = window.AppState.products.map(p => `<option value="${p.id}">${p.name} ($${parseFloat(p.unit_price).toFixed(2)})</option>`).join('');
+    if (modalId === 'newOrderModal') {
+      if (!window.AppState.currentUser) {
+        window.showToast('Sipariş vermek için lütfen önce giriş yapın.', 'info');
+        window.showAuthOverlay(true);
+        return;
       }
-      window.refreshOrderModalDetails();
+      const isSupplier = window.AppState.currentUser?.company?.company_type === 'SUPPLIER';
+      if (isSupplier) {
+        window.showToast('Tedarikçi hesapları sipariş veremez. Sipariş vermek için lütfen Alıcı (Buyer) hesabıyla giriş yapın.', 'warning');
+        return;
+      }
+      if (populateProducts) {
+        const prodSelect = document.getElementById('orderProductSelect');
+        if (prodSelect) {
+          prodSelect.innerHTML = window.AppState.products.map(p => `<option value="${p.id}">${p.name} ($${parseFloat(p.unit_price).toFixed(2)})</option>`).join('');
+        }
+        window.refreshOrderModalDetails();
+      }
     }
 
     const el = document.getElementById(modalId);
-    if (el) el.classList.add('show');
+    if (el) {
+      el.classList.add('show');
+      el.style.display = 'flex';
+    }
   };
 
   window.closeModal = function(modalId) {
     const el = document.getElementById(modalId);
-    if (el) el.classList.remove('show');
+    if (el) {
+      el.classList.remove('show');
+      el.style.display = 'none';
+    }
   };
 
   window.openOrderModalWithProduct = function(productId, supplierId) {
