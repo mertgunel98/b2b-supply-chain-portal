@@ -1443,12 +1443,38 @@
   };
 
   window.openOrderModalWithProduct = function(productId, supplierId) {
-    const prod = window.AppState.products.find(p => p.id === productId);
+    if (!window.AppState.currentUser) {
+      window.showToast('Sipariş vermek için lütfen önce giriş yapın.', 'info');
+      window.showAuthOverlay(true);
+      return;
+    }
+
+    const isSupplier = window.AppState.currentUser.company?.company_type === 'SUPPLIER';
+    if (isSupplier) {
+      window.showToast('Tedarikçi hesabı ile malzeme satın alınamaz. Satın alma işlemi için lütfen bir Alıcı (Buyer) hesabı ile giriş yapın.', 'warning');
+      return;
+    }
+
+    const prod = window.AppState.products.find(p => parseInt(p.id) === parseInt(productId)) ||
+                 (window.AppState.inventory.find(i => parseInt(i.product.id || i.product) === parseInt(productId))?.product);
+
+    if (!prod) {
+      window.showToast('Ürün bilgisi yüklenemedi.', 'danger');
+      return;
+    }
+
     const prodSelect = document.getElementById('orderProductSelect');
-    if (prodSelect && prod) {
+    if (prodSelect) {
       prodSelect.innerHTML = `<option value="${prod.id}" selected>${prod.name} (${prod.sku})</option>`;
       prodSelect.value = prod.id;
     }
+
+    // Default quantity to 1
+    const qtyInput = document.getElementById('orderQuantity');
+    if (qtyInput) {
+      qtyInput.value = 1;
+    }
+
     window.openModal('newOrderModal', false);
     window.refreshOrderModalDetails(productId, supplierId);
   };
@@ -1456,7 +1482,9 @@
   window.refreshOrderModalDetails = function(targetProdId = null, targetSupplierId = null) {
     const prodSelect = document.getElementById('orderProductSelect');
     const selectedProdId = targetProdId || parseInt(prodSelect?.value);
-    const prod = window.AppState.products.find(p => p.id === selectedProdId) || window.AppState.products[0];
+    const prod = window.AppState.products.find(p => parseInt(p.id) === parseInt(selectedProdId)) ||
+                 (window.AppState.inventory.find(i => parseInt(i.product.id || i.product) === parseInt(selectedProdId))?.product) ||
+                 window.AppState.products[0];
 
     if (!prod) return;
 
@@ -1465,7 +1493,7 @@
       supplierId = window.AppState.suppliers[0].id;
     }
 
-    const supplierObj = window.AppState.suppliers.find(s => s.id === supplierId) || { name: prod.preferred_supplier_name || 'Verified Supplier', id: supplierId };
+    const supplierObj = window.AppState.suppliers.find(s => parseInt(s.id) === parseInt(supplierId)) || { name: prod.preferred_supplier_name || 'Verified Supplier', id: supplierId };
 
     const elVendorName = document.getElementById('orderModalVendorBadge');
     if (elVendorName) {
@@ -1478,20 +1506,25 @@
     }
 
     // Find available stock
-    const invItem = window.AppState.inventory.find(i => (i.product.id === prod.id || i.product === prod.id) && (i.company?.id === supplierId || i.company === supplierId)) || window.AppState.inventory.find(i => i.product.id === prod.id);
-    const availableStock = invItem ? invItem.current_stock : 0;
+    const invItem = window.AppState.inventory.find(i => (parseInt(i.product.id || i.product) === parseInt(prod.id)) && (parseInt(i.company?.id || i.company) === parseInt(supplierId))) ||
+                    window.AppState.inventory.find(i => parseInt(i.product.id || i.product) === parseInt(prod.id));
+    const availableStock = invItem ? parseInt(invItem.current_stock) : 0;
 
     const elStockVal = document.getElementById('orderModalAvailableStockVal');
     if (elStockVal) elStockVal.innerText = `${availableStock} ${prod.unit || 'Pieces'}`;
 
     const qtyInput = document.getElementById('orderQuantity');
+    let qty = parseInt(qtyInput?.value || 1);
     if (qtyInput) {
-      qtyInput.max = availableStock;
+      qtyInput.max = availableStock > 0 ? availableStock : 1;
       qtyInput.min = 1;
+      if (qty > availableStock && availableStock > 0) {
+        qty = availableStock;
+        qtyInput.value = availableStock;
+      }
     }
 
     const unitPrice = (invItem && invItem.unit_price) ? parseFloat(invItem.unit_price) : parseFloat(prod.unit_price || 0);
-    const qty = parseInt(qtyInput?.value || 1);
     const totalAmount = unitPrice * qty;
 
     const elUnitPrice = document.getElementById('orderModalUnitPrice');
