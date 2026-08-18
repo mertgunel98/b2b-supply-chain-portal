@@ -1,0 +1,2214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>B2B Supply Chain & Inventory Tracking Portal | MIS 498</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/portal.css?v=20260818a">
+
+  <!-- SCRIPT IN HEAD: ALL FUNCTIONS DEFINED GLOBALLY BEFORE DOM PARSE -->
+  <script>
+  const API_BASE = '/api';
+
+  // Read persisted user session from localStorage if present
+  let initialUser = null;
+  try {
+    const savedUserJson = localStorage.getItem('portal_current_user');
+    if (savedUserJson) {
+      initialUser = JSON.parse(savedUserJson);
+    }
+  } catch (e) {}
+
+  if (!initialUser) {
+    initialUser = {
+      id: 2,
+      username: "buyer_apex",
+      company: {
+        id: 13,
+        name: "Apex Precision Manufacturing Ltd.",
+        company_type: "SME"
+      },
+      role_title: "Head of Supply Chain"
+    };
+  }
+
+  window.AppState = {
+    currentUser: initialUser,
+    activeTab: 'marketplace',
+    inventory: [],
+    products: [],
+    categories: [],
+    suppliers: [],
+    orders: [],
+    scoringConfig: { w1: 0.40, w2: 0.35, w3: 0.25 },
+    supplierLeaderboard: [],
+    criticalAlerts: [],
+    selectedOrderIdForEval: null
+  };
+
+  window.showToast = function(message, type = 'info') {
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'toastContainer';
+      container.className = 'toast-container';
+      document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    let icon = 'ℹ️';
+    if (type === 'success') icon = '✅';
+    if (type === 'danger') icon = '⚠️';
+    if (type === 'warning') icon = '🔔';
+
+    toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 300);
+    }, 4500);
+  };
+
+  window.showAuthOverlay = function(show = true) {
+    const overlay = document.getElementById('authOverlay');
+    if (overlay) {
+      if (show) {
+        overlay.classList.add('show');
+        overlay.style.display = 'flex';
+      } else {
+        overlay.classList.remove('show');
+        overlay.style.display = 'none';
+      }
+    }
+  };
+
+  window.switchAuthTab = function(tab) {
+    const btnLogin = document.getElementById('tabBtnLogin');
+    const btnReg = document.getElementById('tabBtnRegister');
+    const formLogin = document.getElementById('authLoginForm');
+    const formReg = document.getElementById('authRegisterForm');
+
+    if (tab === 'login') {
+      if (btnLogin) btnLogin.classList.add('active');
+      if (btnReg) btnReg.classList.remove('active');
+      if (formLogin) formLogin.style.display = 'block';
+      if (formReg) formReg.style.display = 'none';
+    } else {
+      if (btnReg) btnReg.classList.add('active');
+      if (btnLogin) btnLogin.classList.remove('active');
+      if (formReg) formReg.style.display = 'block';
+      if (formLogin) formLogin.style.display = 'none';
+    }
+  };
+
+  window.selectRegisterRole = function(role) {
+    const roleInput = document.getElementById('regRoleType');
+    if (roleInput) roleInput.value = role;
+
+    const cardSme = document.getElementById('roleCardSME');
+    const cardSup = document.getElementById('roleCardSUPPLIER');
+
+    if (role === 'SME') {
+      if (cardSme) cardSme.classList.add('selected');
+      if (cardSup) cardSup.classList.remove('selected');
+    } else {
+      if (cardSup) cardSup.classList.add('selected');
+      if (cardSme) cardSme.classList.remove('selected');
+    }
+  };
+
+  window.performLogin = async function(username, password) {
+    const btnSubmit = document.getElementById('btnLoginSubmit');
+    if (btnSubmit) {
+      btnSubmit.innerText = 'Signing In...';
+      btnSubmit.disabled = true;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/accounts/auth/login/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.user) {
+        window.showToast(`Logged in as ${data.user.username} (${data.user.company ? data.user.company.name : ''})`, 'success');
+        window.showAuthOverlay(false);
+        window.handleSuccessfulAuth(data.user);
+      } else {
+        window.showToast(data.error || 'Authentication error. Check username and password.', 'danger');
+      }
+    } catch (err) {
+      window.showToast('Network error during login.', 'danger');
+    } finally {
+      if (btnSubmit) {
+        btnSubmit.innerText = 'Sign In to Portal →';
+        btnSubmit.disabled = false;
+      }
+    }
+  };
+
+  window.performRegister = async function() {
+    const roleType = document.getElementById('regRoleType')?.value || 'SME';
+    const companyName = document.getElementById('regCompanyName')?.value;
+    const contactPerson = document.getElementById('regContactPerson')?.value;
+    const taxId = document.getElementById('regTaxId')?.value;
+    const email = document.getElementById('regEmail')?.value;
+    const phone = document.getElementById('regPhone')?.value;
+    const username = document.getElementById('regUsername')?.value;
+    const password = document.getElementById('regPassword')?.value;
+
+    const btnSubmit = document.getElementById('btnRegSubmit');
+    if (btnSubmit) {
+      btnSubmit.innerText = 'Creating Account...';
+      btnSubmit.disabled = true;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/accounts/auth/register/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role_type: roleType,
+          company_name: companyName,
+          contact_person: contactPerson,
+          tax_id: taxId,
+          email: email,
+          phone: phone,
+          username: username,
+          password: password
+        })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.user) {
+        window.showToast(`Account successfully created for ${data.user.username}! Logged in.`, 'success');
+        window.showAuthOverlay(false);
+        window.handleSuccessfulAuth(data.user);
+      } else {
+        window.showToast(data.error || 'Registration failed.', 'danger');
+      }
+    } catch (err) {
+      window.showToast('Network error during registration.', 'danger');
+    } finally {
+      if (btnSubmit) {
+        btnSubmit.innerText = 'Create Account & Sign In →';
+        btnSubmit.disabled = false;
+      }
+    }
+  };
+
+  window.quickFillLogin = async function(username, password) {
+    const uInput = document.getElementById('loginUsername');
+    const pInput = document.getElementById('loginPassword');
+    if (uInput) uInput.value = username;
+    if (pInput) pInput.value = password;
+
+    await window.performLogin(username, password);
+  };
+
+  window.performLogout = async function() {
+    try {
+      await fetch(`${API_BASE}/accounts/auth/logout/`, { method: 'POST' });
+    } catch (e) {}
+    try {
+      localStorage.removeItem('portal_current_user');
+    } catch (e) {}
+    window.AppState.currentUser = null;
+    window.showToast('You have signed out.', 'info');
+    window.showAuthOverlay(true);
+  };
+
+  window.handleSuccessfulAuth = function(user) {
+    window.AppState.currentUser = user;
+    try {
+      localStorage.setItem('portal_current_user', JSON.stringify(user));
+    } catch (e) {}
+    window.showAuthOverlay(false);
+    window.applyUserRoleLayout(user);
+    window.loadAllData();
+  };
+
+  window.initUserSession = async function() {
+    window.showAuthOverlay(false);
+
+    // 1. First apply cached user immediately so layout updates without lag
+    const savedUserJson = localStorage.getItem('portal_current_user');
+    if (savedUserJson) {
+      try {
+        const cachedUser = JSON.parse(savedUserJson);
+        window.AppState.currentUser = cachedUser;
+        window.applyUserRoleLayout(cachedUser);
+      } catch (e) {}
+    }
+
+    // 2. Refresh from backend session if active
+    try {
+      const res = await fetch(`${API_BASE}/accounts/auth/me/`);
+      const data = await res.json();
+      if (data.authenticated && data.user) {
+        window.AppState.currentUser = data.user;
+        try {
+          localStorage.setItem('portal_current_user', JSON.stringify(data.user));
+        } catch (e) {}
+        window.applyUserRoleLayout(data.user);
+      }
+    } catch (e) {}
+
+    window.applyUserRoleLayout(window.AppState.currentUser);
+    window.showAuthOverlay(false);
+    await window.loadAllData();
+  };
+
+  window.applyUserRoleLayout = function(user) {
+    if (!user) return;
+    const isSme = user.company ? (user.company.company_type === 'SME' || user.company.company_type === 'BUYER') : true;
+    const companyName = user.company ? user.company.name : 'Enterprise';
+    
+    // Header & Topbar
+    const elCompTitle = document.getElementById('headerCompanyTitle');
+    if (elCompTitle) {
+      elCompTitle.innerText = companyName;
+    }
+
+    const elSub = document.getElementById('headerSubtitle');
+    if (elSub) {
+      elSub.innerText = '';
+      elSub.style.display = 'none';
+    }
+
+    const elTopComp = document.getElementById('topbarCompanyName');
+    if (elTopComp) elTopComp.innerText = companyName;
+
+    const roleBadge = document.getElementById('topbarRoleBadge');
+    if (roleBadge) {
+      roleBadge.innerText = isSme ? '🏢 Buyer (Alıcı Şirket)' : '🏭 Supplier (Tedarikçi Satıcı)';
+      roleBadge.style.color = isSme ? '#60A5FA' : '#FBBF24';
+    }
+
+    const btnPo = document.getElementById('btnCreatePoTopbar');
+    if (btnPo) btnPo.style.display = isSme ? 'inline-flex' : 'none';
+
+    const elSideUser = document.getElementById('sidebarUsername');
+    if (elSideUser) elSideUser.innerText = user.username;
+
+    const elSideRole = document.getElementById('sidebarUserRole');
+    if (elSideRole) elSideRole.innerText = user.role_title || (isSme ? 'Purchasing Manager' : 'Operations Lead');
+
+    const elAvatar = document.getElementById('sidebarAvatar');
+    if (elAvatar) elAvatar.innerText = (user.username.slice(0, 2) || 'US').toUpperCase();
+
+    // NAVIGATION TABS CONTROL
+    const navAlerts = document.getElementById('navItemAlerts');
+    if (navAlerts) navAlerts.style.display = isSme ? 'none' : 'flex';
+
+    const navOrdersLabel = document.getElementById('navOrdersLabel');
+    if (navOrdersLabel) navOrdersLabel.innerText = isSme ? 'My Orders' : 'Incoming Orders';
+
+    const navScoring = document.getElementById('navItemScoring');
+    if (navScoring) navScoring.style.display = isSme ? 'none' : 'flex';
+
+    const navMyStock = document.getElementById('navItemMyStock');
+    if (navMyStock) navMyStock.style.display = isSme ? 'none' : 'flex';
+
+    const btnMarketReg = document.getElementById('btnMarketRegisterMaterial');
+    if (btnMarketReg) btnMarketReg.style.display = isSme ? 'none' : 'inline-flex';
+
+    if (isSme && (window.AppState.activeTab === 'alerts' || window.AppState.activeTab === 'scoring' || window.AppState.activeTab === 'mystock')) {
+      window.switchTab('marketplace');
+    }
+  };
+
+  window.switchTab = function(tabId) {
+    window.AppState.activeTab = tabId;
+    
+    document.querySelectorAll('.nav-item').forEach(item => {
+      if (item.getAttribute('data-tab') === tabId) {
+        item.classList.add('active');
+      } else {
+        item.classList.remove('active');
+      }
+    });
+
+    document.querySelectorAll('.tab-pane').forEach(pane => {
+      pane.classList.remove('active');
+    });
+    
+    const activePane = document.getElementById(`tab-${tabId}`);
+    if (activePane) activePane.classList.add('active');
+
+    if (tabId === 'marketplace') window.renderMarketplace();
+    if (tabId === 'mystock') window.renderMyStockTable();
+    if (tabId === 'alerts') window.renderAlertsTab();
+    if (tabId === 'orders') window.renderOrdersTable();
+    if (tabId === 'scoring') window.simulateScores();
+  };
+
+  window.loadAllData = async function() {
+    try {
+      await Promise.all([
+        window.fetchInventory(),
+        window.fetchProducts(),
+        window.fetchSuppliers(),
+        window.fetchOrders(),
+        window.fetchScoringConfig()
+      ]);
+
+      window.renderDashboard();
+      window.renderMarketplace();
+      window.renderMyStockTable();
+      window.renderAlertsTab();
+      window.renderOrdersTable();
+      window.simulateScores();
+    } catch (error) {
+      console.error("Error loading data:", error);
+    }
+  };
+
+  window.fetchInventory = async function() {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/items/`);
+      const data = await res.json();
+      window.AppState.inventory = data.results || data || [];
+
+      // Filter critical alerts specifically for supplier if logged in
+      const compId = window.AppState.currentUser?.company?.id;
+      const compType = window.AppState.currentUser?.company?.company_type;
+      const url = (compType === 'SUPPLIER' && compId) 
+        ? `${API_BASE}/inventory/items/critical_alerts/?company=${compId}`
+        : `${API_BASE}/inventory/items/critical_alerts/`;
+
+      try {
+        const alertRes = await fetch(url);
+        const alertData = await alertRes.json();
+        window.AppState.criticalAlerts = alertData.alerts || [];
+      } catch (err) {
+        window.AppState.criticalAlerts = [];
+      }
+
+      // If supplier, always guarantee alerts reflect items where current_stock <= critical_threshold
+      if (window.AppState.criticalAlerts.length === 0 && window.AppState.inventory.length > 0) {
+        window.AppState.criticalAlerts = window.AppState.inventory.filter(i => i.current_stock <= i.critical_threshold);
+      }
+      
+      const alertBadge = document.getElementById('sidebarAlertBadge');
+      if (alertBadge) {
+        alertBadge.innerText = window.AppState.criticalAlerts.length;
+        alertBadge.style.display = window.AppState.criticalAlerts.length > 0 ? 'inline-block' : 'none';
+      }
+    } catch (e) {}
+  };
+
+  window.fetchProducts = async function() {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/products/`);
+      const data = await res.json();
+      window.AppState.products = data.results || data || [];
+
+      const catRes = await fetch(`${API_BASE}/inventory/categories/`);
+      const catData = await catRes.json();
+      window.AppState.categories = catData.results || catData || [];
+
+      const filterCat = document.getElementById('marketCategoryFilter');
+      if (filterCat) {
+        filterCat.innerHTML = `<option value="ALL">All Categories</option>` + 
+          window.AppState.categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+      }
+    } catch (e) {}
+  };
+
+  window.fetchSuppliers = async function() {
+    try {
+      const res = await fetch(`${API_BASE}/accounts/companies/suppliers/`);
+      window.AppState.suppliers = await res.json();
+
+      const filterSup = document.getElementById('marketSupplierFilter');
+      if (filterSup) {
+        filterSup.innerHTML = `<option value="ALL">All Supplying Companies</option>` + 
+          window.AppState.suppliers.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+      }
+    } catch (e) {}
+  };
+
+  window.fetchOrders = async function() {
+    try {
+      const res = await fetch(`${API_BASE}/orders/purchase-orders/`);
+      const data = await res.json();
+      let orders = data.results || data || [];
+
+      if (window.AppState.currentUser && window.AppState.currentUser.company) {
+        const comp = window.AppState.currentUser.company;
+        const compId = parseInt(comp.id);
+        if (comp.company_type === 'SUPPLIER') {
+          orders = orders.filter(o => parseInt(o.supplier_company) === compId || (o.supplier_company_details && parseInt(o.supplier_company_details.id) === compId));
+        } else {
+          orders = orders.filter(o => parseInt(o.buyer_company) === compId || (o.buyer_company_details && parseInt(o.buyer_company_details.id) === compId));
+        }
+      }
+      window.AppState.orders = orders;
+      window.updateIncomingOrdersBadge();
+    } catch (e) {}
+  };
+
+  window.updateIncomingOrdersBadge = function() {
+    const isSupplier = window.AppState.currentUser?.company?.company_type === 'SUPPLIER';
+    const badge = document.getElementById('sidebarOrdersBadge');
+    if (!badge) return;
+
+    if (isSupplier) {
+      const pendingCount = window.AppState.orders.filter(o => o.status === 'PENDING_SUPPLIER').length;
+      if (pendingCount > 0) {
+        badge.innerText = `+${pendingCount}`;
+        badge.style.display = 'inline-block';
+        badge.title = `${pendingCount} yeni gelen sipariş onayınızı bekliyor!`;
+      } else {
+        badge.style.display = 'none';
+      }
+    } else {
+      badge.style.display = 'none';
+    }
+  };
+
+  window.fetchScoringConfig = async function() {
+    try {
+      const res = await fetch(`${API_BASE}/scoring/configurations/`);
+      const data = await res.json();
+      const configs = data.results || data || [];
+      if (configs.length > 0) {
+        window.AppState.scoringConfig = {
+          w1: configs[0].w1_timeliness,
+          w2: configs[0].w2_completeness,
+          w3: configs[0].w3_price_consistency
+        };
+      }
+    } catch (e) {}
+  };
+
+  // -------------------------------------------------------------------------
+  // 1. DASHBOARD
+  // -------------------------------------------------------------------------
+  window.renderDashboard = function() {
+    const isSme = window.AppState.currentUser?.company ? (window.AppState.currentUser.company.company_type === 'SME' || window.AppState.currentUser.company.company_type === 'BUYER') : true;
+
+    const totalSkus = window.AppState.inventory.length;
+    const criticalCount = window.AppState.criticalAlerts.length;
+    const totalOrdersCount = window.AppState.orders.length;
+    const pendingOrders = window.AppState.orders.filter(o => o.status === 'PENDING_SUPPLIER' || o.status === 'CONFIRMED' || o.status === 'IN_TRANSIT').length;
+    
+    let totalSpendOrValuation = 0;
+    if (isSme) {
+      window.AppState.orders.forEach(o => {
+        totalSpendOrValuation += parseFloat(o.total_amount || 0);
+      });
+    } else {
+      window.AppState.inventory.forEach(item => {
+        totalSpendOrValuation += item.current_stock * parseFloat(item.product.unit_price);
+      });
+    }
+
+    if (document.getElementById('statTotalSkus')) document.getElementById('statTotalSkus').innerText = totalSkus;
+    if (document.getElementById('statTotalSkusLabel')) document.getElementById('statTotalSkusLabel').innerText = isSme ? 'Marketplace Materials' : 'Catalog Items';
+    if (document.getElementById('statTotalSkusSub')) document.getElementById('statTotalSkusSub').innerText = isSme ? 'Available from all companies' : 'Active catalog listings';
+
+    const elCard2Title = document.getElementById('statCard2Title');
+    const elCard2Val = document.getElementById('statCard2Val');
+    const elCard2Sub = document.getElementById('statCard2Sub');
+    const elCard2Icon = document.getElementById('statCard2Icon');
+
+    if (isSme) {
+      if (elCard2Title) elCard2Title.innerText = 'Total Orders Placed';
+      if (elCard2Val) {
+        elCard2Val.innerText = totalOrdersCount;
+        elCard2Val.style.color = '#60A5FA';
+      }
+      if (elCard2Sub) elCard2Sub.innerText = 'Purchase orders generated';
+      if (elCard2Icon) {
+        elCard2Icon.innerText = '📑';
+        elCard2Icon.style.background = 'rgba(59, 130, 246, 0.15)';
+        elCard2Icon.style.color = '#60A5FA';
+      }
+    } else {
+      if (elCard2Title) elCard2Title.innerText = 'Critical Stock Alerts';
+      if (elCard2Val) {
+        elCard2Val.innerText = criticalCount;
+        elCard2Val.style.color = '#F87171';
+      }
+      if (elCard2Sub) elCard2Sub.innerText = 'Stock ≤ Safety Threshold';
+      if (elCard2Icon) {
+        elCard2Icon.innerText = '⚠️';
+        elCard2Icon.style.background = 'rgba(239, 68, 68, 0.15)';
+        elCard2Icon.style.color = '#F87171';
+      }
+    }
+
+    if (document.getElementById('statPendingOrders')) document.getElementById('statPendingOrders').innerText = pendingOrders;
+    if (document.getElementById('statPendingOrdersLabel')) document.getElementById('statPendingOrdersLabel').innerText = isSme ? 'Orders in Pipeline' : 'Active Orders';
+    
+    if (document.getElementById('statValuation')) document.getElementById('statValuation').innerText = `$${totalSpendOrValuation.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    if (document.getElementById('statValuationLabel')) document.getElementById('statValuationLabel').innerText = isSme ? 'Total Procurement Spend' : 'Catalog Stock Value';
+    if (document.getElementById('statValuationSub')) document.getElementById('statValuationSub').innerText = isSme ? 'Total value of issued orders' : 'Enrolled materials value';
+
+    const incomingPending = window.AppState.orders.filter(o => o.status === 'PENDING_SUPPLIER').length;
+
+    const alertContainer = document.getElementById('criticalAlertBannerContainer');
+    if (alertContainer) {
+      if (!isSme && incomingPending > 0) {
+        alertContainer.innerHTML = `
+          <div class="critical-alert-box" style="background: linear-gradient(135deg, rgba(37, 99, 235, 0.25), rgba(30, 58, 138, 0.35)); border: 1px solid rgba(59, 130, 246, 0.5); margin-bottom: 20px;">
+            <div class="alert-left">
+              <div class="alert-icon-wrapper" style="background: rgba(37, 99, 235, 0.3); color: #93C5FD; font-size: 1.3rem;">
+                📥
+              </div>
+              <div class="alert-info">
+                <h3 style="color: #93C5FD;">🔔 ${incomingPending} Yeni Alıcı Siparişi Geldi! (+${incomingPending})</h3>
+                <p style="color: #CBD5E1;">Alıcı firmalardan gelen satın alma siparişleriniz onayınızı bekliyor.</p>
+              </div>
+            </div>
+            <button class="btn btn-primary" style="background: #2563EB; font-weight: 700;" onclick="window.switchTab('orders');">
+              Gelen Siparişleri İncele & Onayla &rarr;
+            </button>
+          </div>
+        `;
+      } else if (!isSme && criticalCount > 0) {
+        alertContainer.innerHTML = `
+          <div class="critical-alert-box">
+            <div class="alert-left">
+              <div class="alert-icon-wrapper">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                  <line x1="12" y1="9" x2="12" y2="13"></line>
+                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+              </div>
+              <div class="alert-info">
+                <h3>🚨 ${criticalCount} Material(s) Below Safety Threshold Buffer!</h3>
+                <p>Current stock levels have dropped below your configured safety margin. Immediate restocking required.</p>
+              </div>
+            </div>
+            <button class="btn btn-danger" onclick="window.switchTab('alerts');">
+              Review Alerts Tab &rarr;
+            </button>
+          </div>
+        `;
+      } else {
+        alertContainer.innerHTML = `
+          <div style="background: linear-gradient(135deg, rgba(37, 99, 235, 0.15), rgba(59, 130, 246, 0.05)); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 12px; padding: 18px 22px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between;">
+            <div>
+              <strong style="color: #93C5FD; font-size: 1.05rem; display: block; margin-bottom: 3px;">🛒 B2B Materials Marketplace</strong>
+              <span style="color: var(--text-secondary); font-size: 0.84rem;">Browse all materials offered by registered companies in the ecosystem and issue instant Purchase Orders.</span>
+            </div>
+            <button class="btn btn-primary" onclick="window.switchTab('marketplace')">Explore All Materials &rarr;</button>
+          </div>
+        `;
+      }
+    }
+
+    const recentOrdersTbody = document.getElementById('dashboardRecentOrdersTbody');
+    if (recentOrdersTbody) {
+      const recent = window.AppState.orders.slice(0, 5);
+      if (recent.length === 0) {
+        recentOrdersTbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">No recent orders.</td></tr>`;
+      } else {
+        recentOrdersTbody.innerHTML = recent.map(o => `
+          <tr>
+            <td><strong>${o.order_number}</strong></td>
+            <td>${isSme ? (o.supplier_company_details?.name || 'Supplier') : (o.buyer_company_details?.name || 'Buyer')}</td>
+            <td>$${parseFloat(o.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+            <td>${window.getStatusBadge(o.status, o.status_display)}</td>
+            <td>${o.expected_delivery_date}</td>
+            <td>
+              <a href="/api/orders/purchase-orders/${o.id}/pdf/" target="_blank" class="btn btn-secondary btn-sm">
+                📄 PO PDF
+              </a>
+            </td>
+          </tr>
+        `).join('');
+      }
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 2. B2B MARKETPLACE (ALL COMPANIES MATERIALS & DIRECT PURCHASING)
+  // -------------------------------------------------------------------------
+  window.renderMarketplace = function() {
+    const gridContainer = document.getElementById('marketplaceGridContainer');
+    if (!gridContainer) return;
+
+    let items = window.AppState.inventory;
+    const catFilter = document.getElementById('marketCategoryFilter')?.value || 'ALL';
+    const supFilter = document.getElementById('marketSupplierFilter')?.value || 'ALL';
+    const query = (document.getElementById('marketSearchInput')?.value || '').toLowerCase().trim();
+
+    if (catFilter !== 'ALL') {
+      items = items.filter(i => i.product.category == catFilter);
+    }
+    if (supFilter !== 'ALL') {
+      items = items.filter(i => i.product.preferred_supplier == supFilter);
+    }
+    if (query) {
+      items = items.filter(i => 
+        i.product.name.toLowerCase().includes(query) || 
+        i.product.sku.toLowerCase().includes(query) || 
+        (i.product.preferred_supplier_name && i.product.preferred_supplier_name.toLowerCase().includes(query))
+      );
+    }
+
+    if (items.length === 0) {
+      gridContainer.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 50px 20px; background: var(--bg-card); border-radius: 12px; border: 1px dashed var(--border-subtle);">
+          <div style="font-size: 2.5rem; margin-bottom: 8px;">🔍</div>
+          <h3 style="font-size: 1.1rem; color: var(--text-primary);">No materials found matching your filters</h3>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Try clearing search keywords or selecting all categories.</p>
+        </div>
+      `;
+      return;
+    }
+
+    gridContainer.innerHTML = items.map(item => {
+      const isAvailable = item.current_stock > 0;
+      const stockBadge = isAvailable
+        ? `<span class="badge badge-healthy">🟢 In Stock: ${item.current_stock} ${item.product.unit}</span>`
+        : `<span class="badge badge-critical">🔴 Out of Stock</span>`;
+
+      const supplierId = item.product.preferred_supplier || (item.company ? item.company.id : 14);
+
+      return `
+        <div class="card-section" style="display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); border-radius: 14px; background: rgba(30, 41, 59, 0.6); transition: all 0.2s ease; padding: 20px; position: relative;">
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <span class="badge badge-silver" style="font-size: 0.72rem;">${item.product.category_name || 'General Part'}</span>
+              ${stockBadge}
+            </div>
+
+            <h3 style="font-size: 1.15rem; font-weight: 700; color: #F8FAFC; margin-bottom: 4px; line-height: 1.3;">
+              ${item.product.name}
+            </h3>
+            <span style="font-family: monospace; font-size: 0.75rem; color: #94A3B8; display: block; margin-bottom: 14px;">
+              SKU: ${item.product.sku}
+            </span>
+
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px;">
+              <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px;">
+                Supplied By Verified Vendor
+              </div>
+              <strong style="color: #60A5FA; font-size: 0.88rem; display: flex; align-items: center; gap: 4px;">
+                🏭 ${item.product.preferred_supplier_name || 'Verified Supplier'}
+              </strong>
+              <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 2px;">
+                📍 ${item.warehouse_location || 'Central Depot'}
+              </div>
+            </div>
+          </div>
+
+          <div style="border-top: 1px solid var(--border-subtle); padding-top: 14px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <span style="font-size: 0.7rem; color: var(--text-muted); display: block;">Unit Price</span>
+              <strong style="font-size: 1.3rem; font-weight: 800; color: #34D399;">
+                $${parseFloat(item.product.unit_price).toFixed(2)}
+              </strong>
+              <span style="font-size: 0.72rem; color: var(--text-muted);">/ ${item.product.unit}</span>
+            </div>
+
+            <button class="btn btn-primary" style="padding: 9px 16px; font-size: 0.88rem;" onclick="window.openOrderModalWithProduct(${item.product.id}, ${supplierId})">
+              🛒 Buy / Satın Al
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  };
+
+  // -------------------------------------------------------------------------
+  // 3. MY PRODUCTS & STOCK (FOR SUPPLIERS - LIVE PRICE & SAFETY THRESHOLD EDITING)
+  // -------------------------------------------------------------------------
+  window.renderMyStockTable = function() {
+    const tbody = document.getElementById('myStockTableBody');
+    if (!tbody) return;
+
+    const myComp = window.AppState.currentUser?.company;
+    const myCompanyId = myComp ? parseInt(myComp.id) : null;
+
+    // Filter items belonging strictly to this supplier company!
+    let items = window.AppState.inventory.filter(item => {
+      if (!myCompanyId) return true;
+      const prefSupId = item.product?.preferred_supplier;
+      const itemCompId = item.company?.id || item.company;
+      return (prefSupId && parseInt(prefSupId) === myCompanyId) || 
+             (itemCompId && parseInt(itemCompId) === myCompanyId);
+    });
+
+    if (items.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 48px 20px;">
+            <div style="font-size: 2.2rem; margin-bottom: 8px;">📦</div>
+            <h4 style="color: #F8FAFC; font-size: 1.1rem; font-weight: 700; margin-bottom: 6px;">Henüz Kayıtlı Malzemeniz Bulunmuyor</h4>
+            <p style="color: var(--text-secondary); font-size: 0.85rem; max-width: 480px; margin: 0 auto 16px auto;">
+              Şirketinizin ürettiği veya tedarik ettiği parçaları kataloğunuza ekleyerek B2B Pazaryerinde alıcı şirketlerin sipariş vermesini sağlayabilirsiniz.
+            </p>
+            <button class="btn btn-primary" onclick="window.openModal('addProductModal')">
+              + Add Your First Material / İlk Malzemenizi Ekleyin
+            </button>
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = items.map(item => {
+      const isCritical = item.current_stock <= item.critical_threshold;
+
+      return `
+        <tr style="${isCritical ? 'background: rgba(239, 68, 68, 0.06);' : ''}">
+          <td>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              ${isCritical ? '<span title="Critical deficit below safety threshold" style="color: #EF4444; font-size: 1.1rem;">🚨</span>' : ''}
+              <div>
+                <strong>${item.product.name}</strong><br/>
+                <span style="font-size: 0.72rem; color: var(--text-muted); font-family: monospace;">SKU: ${item.product.sku}</span>
+              </div>
+            </div>
+          </td>
+          <td><span class="badge badge-silver">${item.product.category_name || 'General'}</span></td>
+          <td>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button class="btn btn-secondary btn-sm" onclick="window.adjustStock(${item.id}, -5)">-5</button>
+              <strong style="font-size: 1.05rem; color: ${isCritical ? '#F87171' : '#F8FAFC'}; font-weight: 800;">${item.current_stock}</strong>
+              <button class="btn btn-secondary btn-sm" onclick="window.adjustStock(${item.id}, +10)">+10</button>
+            </div>
+          </td>
+          
+          <!-- LIVE EDITABLE SAFETY THRESHOLD COLUMN -->
+          <td>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <input type="number" min="0" id="thresholdInput_${item.id}" value="${item.critical_threshold}" class="form-control" style="width: 75px; padding: 4px 6px; font-size: 0.88rem; font-weight: 700; color: #F59E0B; text-align: center;">
+              <button class="btn btn-secondary btn-sm" onclick="window.updateSafetyThreshold(${item.id}, document.getElementById('thresholdInput_${item.id}').value)" title="Save safety threshold">
+                💾 Save
+              </button>
+            </div>
+            <span style="font-size: 0.7rem; color: ${isCritical ? '#F87171' : '#10B981'}; font-weight: 600; display: block; margin-top: 3px;">
+              ${isCritical ? `🚨 Critical Deficit (${item.critical_threshold - item.current_stock} short)` : `🟢 Healthy Buffer (+${item.current_stock - item.critical_threshold})`}
+            </span>
+          </td>
+
+          <!-- LIVE EDITABLE UNIT PRICE COLUMN -->
+          <td>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="color: #94A3B8; font-weight: 700;">$</span>
+              <input type="number" step="0.01" id="priceInput_${item.product.id}" value="${parseFloat(item.product.unit_price).toFixed(2)}" class="form-control" style="width: 85px; padding: 4px 8px; font-size: 0.88rem; font-weight: 700; color: #34D399;">
+              <button class="btn btn-primary btn-sm" onclick="window.updateProductPrice(${item.product.id}, document.getElementById('priceInput_${item.product.id}').value)" title="Save updated unit price">
+                💾 Save
+              </button>
+            </div>
+          </td>
+
+          <td>${item.warehouse_location || 'Central Depot'}</td>
+          <td>
+            <button class="btn btn-secondary btn-sm" onclick="window.adjustStock(${item.id}, +50)">+50 Restock</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  };
+
+  // Safety Threshold Update Handler
+  window.updateSafetyThreshold = async function(itemId, newThreshold) {
+    const threshold = parseInt(newThreshold);
+    if (isNaN(threshold) || threshold < 0) {
+      window.showToast('Please enter a valid non-negative threshold integer.', 'warning');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/inventory/items/${itemId}/update_threshold/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ critical_threshold: threshold })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        window.showToast(data.message, data.is_critical ? 'warning' : 'success');
+        await window.fetchInventory();
+        window.renderDashboard();
+        window.renderMyStockTable();
+        window.renderAlertsTab();
+      } else {
+        window.showToast(data.error || 'Failed to update threshold.', 'danger');
+      }
+    } catch (err) {
+      window.showToast('Network error updating threshold.', 'danger');
+    }
+  };
+
+  window.updateProductPrice = async function(productId, newPrice) {
+    const price = parseFloat(newPrice);
+    if (isNaN(price) || price < 0) {
+      window.showToast('Please enter a valid price.', 'warning');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/inventory/products/${productId}/`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unit_price: price })
+      });
+      if (res.ok) {
+        window.showToast(`Unit price updated to $${price.toFixed(2)} successfully!`, 'success');
+        await window.fetchProducts();
+        await window.fetchInventory();
+        window.renderDashboard();
+        window.renderMarketplace();
+        window.renderMyStockTable();
+      } else {
+        window.showToast('Failed to update price.', 'danger');
+      }
+    } catch (err) {
+      window.showToast('Network error updating price.', 'danger');
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 4. DEDICATED ALERTS TAB (FOR SUPPLIERS ONLY)
+  // -------------------------------------------------------------------------
+  window.renderAlertsTab = function() {
+    const container = document.getElementById('alertsListContainer');
+    if (!container) return;
+
+    const alerts = window.AppState.criticalAlerts;
+
+    if (alerts.length === 0) {
+      container.innerHTML = `
+        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 12px; padding: 32px; text-align: center;">
+          <div style="font-size: 2.5rem; margin-bottom: 8px;">🛡️</div>
+          <h3 style="color: #34D399; font-size: 1.2rem; font-weight: 700;">No Critical Inventory Warnings</h3>
+          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px;">All your supplied materials maintain sufficient stock above your configured safety thresholds.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = alerts.map(alert => {
+      const name = alert.product ? alert.product.name : (alert.product_name || 'Material Item');
+      const sku = alert.product ? alert.product.sku : (alert.sku || 'SKU');
+      const unit = alert.product ? alert.product.unit : 'Units';
+      const deficit = alert.critical_threshold - alert.current_stock;
+
+      return `
+        <div class="card-section" style="border-left: 5px solid #EF4444; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; background: rgba(239, 68, 68, 0.05); flex-wrap: wrap; gap: 14px;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+              <span class="badge badge-critical">🚨 CRITICAL SAFETY THRESHOLD DEFICIT</span>
+              <strong style="font-size: 1.1rem; color: #F8FAFC;">${name}</strong>
+              <span style="font-family: monospace; font-size: 0.75rem; color: var(--text-muted);">(${sku})</span>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 6px;">
+              Current Stock: <strong style="color: #F87171; font-size: 1.05rem;">${alert.current_stock} ${unit}</strong> &nbsp;|&nbsp; 
+              Configured Safety Threshold: <strong style="color: #FBBF24;">${alert.critical_threshold} ${unit}</strong> &nbsp;|&nbsp; 
+              Warehouse: <span>${alert.warehouse_location || 'Central Warehouse'}</span>
+            </p>
+            <div style="font-size: 0.82rem; color: #FCA5A5; font-weight: 600;">
+              ⚠️ Stock Deficit: Stock is <strong style="color: #EF4444;">${deficit > 0 ? deficit : 0} ${unit}</strong> below your set safety threshold! Restock immediately to avoid order fulfillment failure.
+            </div>
+          </div>
+          
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <!-- Instant threshold modifier -->
+            <div style="display: flex; align-items: center; gap: 6px; background: rgba(15, 23, 42, 0.8); padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-subtle);">
+              <span style="font-size: 0.72rem; color: #94A3B8;">Safety Threshold:</span>
+              <input type="number" min="0" id="alertThresholdInput_${alert.id}" value="${alert.critical_threshold}" class="form-control" style="width: 65px; padding: 2px 6px; font-size: 0.85rem; height: auto; text-align: center; color: #F59E0B; font-weight: 700;">
+              <button class="btn btn-secondary btn-sm" style="padding: 3px 8px;" onclick="window.updateSafetyThreshold(${alert.id}, document.getElementById('alertThresholdInput_${alert.id}').value)">
+                💾 Set
+              </button>
+            </div>
+
+            <button class="btn btn-secondary" onclick="window.adjustStock(${alert.id}, +50)">
+              📦 Restock +50 Units
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  };
+
+  window.adjustStock = async function(itemId, delta) {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/items/${itemId}/adjust_stock/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delta })
+      });
+      const data = await res.json();
+      window.showToast(data.message, delta > 0 ? 'success' : 'warning');
+      await window.fetchInventory();
+      window.renderDashboard();
+      window.renderMarketplace();
+      window.renderMyStockTable();
+      window.renderAlertsTab();
+    } catch (err) {
+      window.showToast('Failed to update stock', 'danger');
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 5. ORDERS TABLE & EVALUATION DISPLAY
+  // -------------------------------------------------------------------------
+  window.renderOrdersTable = function(filter = 'ALL') {
+    const tbody = document.getElementById('ordersTableBody');
+    if (!tbody) return;
+
+    const isSupplier = window.AppState.currentUser?.company?.company_type === 'SUPPLIER';
+    const isSme = !isSupplier;
+
+    let orders = window.AppState.orders;
+    if (filter !== 'ALL') {
+      orders = orders.filter(o => o.status === filter);
+    }
+
+    const titleElem = document.getElementById('ordersSectionTitle');
+    if (titleElem) {
+      titleElem.innerText = isSupplier 
+        ? '📑 Incoming Buyer Purchase Orders (Gelen Siparişler)' 
+        : '📑 My Purchase Orders & Automated Invoicing Hub';
+    }
+
+    if (orders.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">No purchase orders found for this account.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = orders.map(o => {
+      let actionButtons = `
+        <a href="/api/orders/purchase-orders/${o.id}/pdf/" target="_blank" class="btn btn-secondary btn-sm" title="View Purchase Order PDF">
+          📄 PO PDF
+        </a>
+      `;
+
+      if (o.invoice) {
+        actionButtons += `
+          <a href="/api/orders/invoices/${o.invoice.id}/pdf/" target="_blank" class="btn btn-secondary btn-sm" style="color: #34D399;" title="View Invoice PDF">
+            🧾 Invoice PDF
+          </a>
+        `;
+      } else if (o.status === 'DELIVERED' || o.status === 'IN_TRANSIT') {
+        actionButtons += `
+          <button class="btn btn-secondary btn-sm" onclick="window.generateInvoiceForOrder(${o.id})">
+            + Generate Invoice
+          </button>
+        `;
+      }
+
+      // Evaluation Display / Action
+      let evalBlock = '';
+      if (o.is_evaluated) {
+        const composite = ((parseFloat(o.timeliness_score || 100) * 0.40) + (parseFloat(o.completeness_score || 100) * 0.35) + (parseFloat(o.price_consistency_score || 100) * 0.25)).toFixed(1);
+        evalBlock = `
+          <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 6px; padding: 6px 10px; margin-top: 6px; font-size: 0.76rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <strong style="color: #FBBF24;">⭐ Rating: ${composite}%</strong>
+              <span style="font-size: 0.7rem; color: #94A3B8;">${o.evaluated_at ? new Date(o.evaluated_at).toLocaleDateString() : 'Evaluated'}</span>
+            </div>
+            <div style="color: #CBD5E1; font-size: 0.72rem; margin-top: 3px;">
+              ⏱️ Timeliness: <b>${o.timeliness_score}%</b> &nbsp;|&nbsp; 📦 Completeness: <b>${o.completeness_score}%</b> &nbsp;|&nbsp; 💲 Price: <b>${o.price_consistency_score}%</b>
+            </div>
+            ${o.evaluation_feedback ? `<div style="color: #F8FAFC; margin-top: 3px; font-style: italic; font-size: 0.72rem;">💬 "${o.evaluation_feedback}"</div>` : ''}
+          </div>
+        `;
+      }
+
+      // Supplier Lifecycle Actions
+      if (isSupplier) {
+        if (o.status === 'PENDING_SUPPLIER') {
+          actionButtons += `
+            <button class="btn btn-primary btn-sm" style="background: #2563EB; font-weight: 700;" onclick="window.updateOrderStatus(${o.id}, 'CONFIRMED')">🤝 Accept & Confirm / Onayla</button>
+            <button class="btn btn-secondary btn-sm" style="color: #F87171; border-color: rgba(239, 68, 68, 0.4);" onclick="window.supplierDeclineOrder(${o.id})">❌ Decline / Reddet</button>
+          `;
+        } else if (o.status === 'CONFIRMED') {
+          actionButtons += `
+            <button class="btn btn-primary btn-sm" style="background: #7C3AED; font-weight: 700;" onclick="window.updateOrderStatus(${o.id}, 'IN_TRANSIT')">🚚 Ship Cargo / Kargola</button>
+            <button class="btn btn-secondary btn-sm" style="color: #F87171; border-color: rgba(239, 68, 68, 0.4);" onclick="window.supplierDeclineOrder(${o.id})">❌ Cancel / İptal Et</button>
+          `;
+        } else if (o.status === 'IN_TRANSIT') {
+          actionButtons += `<button class="btn btn-success btn-sm" style="background: #10B981; font-weight: 700;" onclick="window.updateOrderStatus(${o.id}, 'DELIVERED')">✓ Mark Delivered / Teslim Et</button>`;
+        } else if (o.status === 'REJECTED_BY_SUPPLIER') {
+          actionButtons += `<span style="font-size: 0.72rem; color: #F87171; font-weight: 600;">❌ You Declined this Order</span>`;
+        } else if (o.status === 'REJECTED_BY_BUYER' || o.status === 'REJECTED' || o.status === 'CANCELLED') {
+          actionButtons += `<span style="font-size: 0.72rem; color: #F87171; font-weight: 600;">❌ Rejected by Buyer</span>`;
+        }
+      } 
+      // Buyer Lifecycle & EVALUATION / REJECTION Actions
+      else {
+        if (o.status === 'PENDING_SUPPLIER') {
+          actionButtons += `<button class="btn btn-secondary btn-sm" style="color: #F87171; border-color: rgba(239, 68, 68, 0.4);" onclick="window.rejectOrder(${o.id})">❌ Cancel / İptal Et</button>`;
+        } else if (o.status === 'CONFIRMED') {
+          actionButtons += `<button class="btn btn-secondary btn-sm" style="color: #F87171; border-color: rgba(239, 68, 68, 0.4);" onclick="window.rejectOrder(${o.id})">❌ Cancel / Vazgeç</button>`;
+        } else if (o.status === 'IN_TRANSIT') {
+          actionButtons += `
+            <button class="btn btn-success btn-sm" style="background: #10B981; font-weight: 700;" onclick="window.updateOrderStatus(${o.id}, 'DELIVERED')">📦 Receive & Confirm / Teslim Al</button>
+            <button class="btn btn-secondary btn-sm" style="color: #F87171; border-color: rgba(239, 68, 68, 0.4);" onclick="window.rejectOrder(${o.id})">❌ Reject Delivery / Reddet</button>
+          `;
+        } else if (o.status === 'DELIVERED') {
+          if (!o.is_evaluated) {
+            actionButtons += `
+              <button class="btn btn-primary btn-sm" style="background: #F59E0B; border-color: #D97706; color: black; font-weight: 700; box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);" onclick="window.openEvaluationModal(${o.id})">
+                ⭐ Rate Supplier (W₁, W₂, W₃)
+              </button>
+            `;
+          }
+        } else if (o.status === 'REJECTED_BY_SUPPLIER') {
+          actionButtons += `<span style="font-size: 0.72rem; color: #F87171; font-weight: 600;">❌ Declined by Supplier</span>`;
+        } else if (o.status === 'REJECTED_BY_BUYER' || o.status === 'REJECTED' || o.status === 'CANCELLED') {
+          actionButtons += `<span style="font-size: 0.72rem; color: #F87171; font-weight: 600;">❌ Order Cancelled</span>`;
+        }
+      }
+
+      return `
+        <tr>
+          <td>
+            <strong>${o.order_number}</strong>
+            ${evalBlock}
+          </td>
+          <td>
+            <span style="font-size: 0.85rem; font-weight: 600;">${isSme ? (o.supplier_company_details?.name || 'Supplier') : (o.buyer_company_details?.name || 'Buyer')}</span><br/>
+            <span style="font-size: 0.72rem; color: var(--text-muted);">${isSme ? 'Vendor' : 'Client SME'}</span>
+          </td>
+          <td>
+            <strong style="color: #34D399;">$${parseFloat(o.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+          </td>
+          <td>${window.getStatusBadge(o.status, o.status_display)}</td>
+          <td>${o.expected_delivery_date}</td>
+          <td>${o.actual_delivery_date || '<span style="color: var(--text-muted);">-</span>'}</td>
+          <td>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+              ${actionButtons}
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  };
+
+  window.getStatusBadge = function(status, label) {
+    switch (status) {
+      case 'DELIVERED':
+        return `<span class="badge badge-healthy">✓ ${label || 'Delivered'}</span>`;
+      case 'IN_TRANSIT':
+        return `<span class="badge badge-info">🚚 ${label || 'In Transit'}</span>`;
+      case 'CONFIRMED':
+        return `<span class="badge badge-warning">🤝 ${label || 'Confirmed'}</span>`;
+      case 'PENDING_SUPPLIER':
+        return `<span class="badge badge-warning" style="background: rgba(245, 158, 11, 0.2); color: #FBBF24; border: 1px solid rgba(245, 158, 11, 0.4);">⏳ ${label || 'Pending'}</span>`;
+      case 'REJECTED_BY_SUPPLIER':
+        return `<span class="badge badge-critical" style="background: rgba(239, 68, 68, 0.2); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.4);">❌ Declined by Supplier</span>`;
+      case 'REJECTED_BY_BUYER':
+      case 'REJECTED':
+        return `<span class="badge badge-critical" style="background: rgba(239, 68, 68, 0.2); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.4);">❌ Rejected by Buyer</span>`;
+      case 'CANCELLED':
+        return `<span class="badge badge-critical" style="background: rgba(239, 68, 68, 0.2); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.4);">❌ Cancelled / İptal</span>`;
+      default:
+        return `<span class="badge badge-silver">${label}</span>`;
+    }
+  };
+
+  window.rejectOrder = async function(orderId) {
+    const reason = prompt("Lütfen siparişi iptal etme/reddetme nedeninizi belirtin (veya onaylamak için Tamam'a basın):", "Tedarik planı değişti / Hatalı sipariş");
+    if (reason === null) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/orders/purchase-orders/${orderId}/update_status/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'REJECTED_BY_BUYER' })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        window.showToast('Sipariş alıcı tarafından iptal edildi / reddedildi.', 'warning');
+        await window.fetchOrders();
+        window.renderDashboard();
+        window.renderOrdersTable();
+      } else {
+        window.showToast(data.error || 'İptal işlemi gerçekleştirilemedi.', 'danger');
+      }
+    } catch (err) {
+      window.showToast('Ağ hatası oluştu.', 'danger');
+    }
+  };
+
+  window.supplierDeclineOrder = async function(orderId) {
+    const reason = prompt("Lütfen siparişi reddetme / geri çevirme nedeninizi belirtin (veya onaylamak için Tamam'a basın):", "Stok yetersiz / Üretim kapasitesi dolu");
+    if (reason === null) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/orders/purchase-orders/${orderId}/update_status/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'REJECTED_BY_SUPPLIER' })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        window.showToast('Sipariş tedarikçi tarafından reddedildi / geri çevrildi.', 'warning');
+        await window.fetchOrders();
+        window.renderDashboard();
+        window.renderOrdersTable();
+      } else {
+        window.showToast(data.error || 'İşlem gerçekleştirilemedi.', 'danger');
+      }
+    } catch (err) {
+      window.showToast('Ağ hatası oluştu.', 'danger');
+    }
+  };
+
+  window.updateOrderStatus = async function(orderId, newStatus) {
+    try {
+      const res = await fetch(`${API_BASE}/orders/purchase-orders/${orderId}/update_status/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      const data = await res.json();
+      window.showToast(data.message, 'success');
+      await window.fetchOrders();
+      await window.fetchInventory();
+      window.renderDashboard();
+      window.renderOrdersTable();
+      window.renderAlertsTab();
+      window.simulateScores();
+    } catch (err) {
+      window.showToast('Failed to update status', 'danger');
+    }
+  };
+
+  window.generateInvoiceForOrder = async function(orderId) {
+    try {
+      const res = await fetch(`${API_BASE}/orders/purchase-orders/${orderId}/generate_invoice/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      window.showToast(data.message, 'success');
+      await window.fetchOrders();
+      window.renderOrdersTable();
+    } catch (err) {
+      window.showToast('Failed to generate invoice', 'danger');
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 6. SUPPLIER EVALUATION (W1, W2, W3) MODAL HANDLERS
+  // -------------------------------------------------------------------------
+  window.openEvaluationModal = function(orderId) {
+    const order = window.AppState.orders.find(o => o.id === orderId);
+    if (!order) return;
+
+    window.AppState.selectedOrderIdForEval = orderId;
+
+    const elTitle = document.getElementById('evalOrderTitle');
+    if (elTitle) elTitle.innerText = `Evaluate Order: ${order.order_number}`;
+
+    const elSup = document.getElementById('evalSupplierName');
+    if (elSup) elSup.innerText = `Supplier: ${order.supplier_company_details ? order.supplier_company_details.name : 'Vendor'}`;
+
+    // Reset sliders
+    document.getElementById('evalSliderW1').value = 100;
+    document.getElementById('evalValW1').innerText = '100%';
+    document.getElementById('evalSliderW2').value = 100;
+    document.getElementById('evalValW2').innerText = '100%';
+    document.getElementById('evalSliderW3').value = 100;
+    document.getElementById('evalValW3').innerText = '100%';
+    document.getElementById('evalFeedbackNotes').value = '';
+
+    window.openModal('evaluateOrderModal');
+  };
+
+  window.submitOrderEvaluation = async function() {
+    const orderId = window.AppState.selectedOrderIdForEval;
+    if (!orderId) return;
+
+    const w1 = parseFloat(document.getElementById('evalSliderW1')?.value || 100);
+    const w2 = parseFloat(document.getElementById('evalSliderW2')?.value || 100);
+    const w3 = parseFloat(document.getElementById('evalSliderW3')?.value || 100);
+    const feedback = document.getElementById('evalFeedbackNotes')?.value || '';
+
+    try {
+      const res = await fetch(`${API_BASE}/orders/purchase-orders/${orderId}/evaluate_order/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timeliness_score: w1,
+          completeness_score: w2,
+          price_consistency_score: w3,
+          feedback: feedback
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        window.showToast(data.message, 'success');
+        window.closeModal('evaluateOrderModal');
+        await window.fetchOrders();
+        await window.fetchScoringConfig();
+        window.renderOrdersTable();
+        await window.simulateScores();
+      } else {
+        window.showToast(data.error || 'Evaluation submission failed.', 'danger');
+      }
+    } catch (err) {
+      window.showToast('Network error during evaluation.', 'danger');
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 7. SUPPLIER SCORING (FOR SUPPLIERS ONLY)
+  // -------------------------------------------------------------------------
+  window.simulateScores = async function() {
+    const { w1, w2, w3 } = window.AppState.scoringConfig;
+    try {
+      const res = await fetch(`${API_BASE}/scoring/evaluations/simulate/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ w1, w2, w3 })
+      });
+      const data = await res.json();
+      window.AppState.supplierLeaderboard = data.leaderboard || [];
+      window.renderLeaderboard();
+    } catch (err) {}
+  };
+
+  window.renderLeaderboard = function() {
+    const container = document.getElementById('supplierLeaderboardContainer');
+    if (!container) return;
+
+    const myCompanyId = window.AppState.currentUser?.company?.id;
+    let items = window.AppState.supplierLeaderboard;
+
+    const myScorecard = items.find(s => parseInt(s.supplier_id) === parseInt(myCompanyId)) || items[0];
+
+    let html = '';
+    if (myScorecard) {
+      const evaluatedOrders = window.AppState.orders.filter(o => o.is_evaluated);
+
+      html += `
+        <div class="card-section" style="border: 2px solid #3B82F6; background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95)); margin-bottom: 28px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+            <div>
+              <span class="badge badge-info" style="margin-bottom: 8px;">🎯 Your Official Supplier Scorecard</span>
+              <h2 style="font-size: 1.5rem; font-weight: 800;">${myScorecard.supplier_name}</h2>
+              <p style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 4px;">
+                Calculated dynamically from real buyer order evaluations ($W_1, W_2, W_3$).
+              </p>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 2.8rem; font-weight: 900; color: #60A5FA; letter-spacing: -0.04em;">
+                ${myScorecard.overall_score.toFixed(1)}%
+              </div>
+              <span class="badge badge-gold" style="font-size: 0.85rem; padding: 6px 14px;">${myScorecard.tier}</span>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 20px;">
+            <div style="background: var(--bg-card); padding: 16px; border-radius: 10px; border: 1px solid var(--border-subtle);">
+              <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 6px;">
+                <span style="color: var(--text-secondary);">Delivery Timeliness ($W_1$ - 40%)</span>
+                <strong style="color: #60A5FA;">${myScorecard.timeliness_score.toFixed(1)}%</strong>
+              </div>
+              <div class="progress-container">
+                <div class="progress-fill" style="width: ${myScorecard.timeliness_score}%; background-color: #3B82F6;"></div>
+              </div>
+              <span style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; display: block;">Evaluated on-time performance</span>
+            </div>
+
+            <div style="background: var(--bg-card); padding: 16px; border-radius: 10px; border: 1px solid var(--border-subtle);">
+              <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 6px;">
+                <span style="color: var(--text-secondary);">Order Completeness ($W_2$ - 35%)</span>
+                <strong style="color: #34D399;">${myScorecard.completeness_score.toFixed(1)}%</strong>
+              </div>
+              <div class="progress-container">
+                <div class="progress-fill" style="width: ${myScorecard.completeness_score}%; background-color: #10B981;"></div>
+              </div>
+              <span style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; display: block;">Fulfilled item volume accuracy</span>
+            </div>
+
+            <div style="background: var(--bg-card); padding: 16px; border-radius: 10px; border: 1px solid var(--border-subtle);">
+              <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 6px;">
+                <span style="color: var(--text-secondary);">Price Consistency ($W_3$ - 25%)</span>
+                <strong style="color: #FBBF24;">${myScorecard.price_consistency_score.toFixed(1)}%</strong>
+              </div>
+              <div class="progress-container">
+                <div class="progress-fill" style="width: ${myScorecard.price_consistency_score}%; background-color: #F59E0B;"></div>
+              </div>
+              <span style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; display: block;">Catalog price adherence</span>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Evaluation History Section
+      if (evaluatedOrders.length > 0) {
+        html += `
+          <div class="card-section" style="margin-top: 20px;">
+            <div class="section-header">
+              <h2>💬 Recent Buyer Evaluation Reviews & Ratings</h2>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 14px;">
+              ${evaluatedOrders.map(eo => {
+                const comp = ((eo.timeliness_score * 0.40) + (eo.completeness_score * 0.35) + (eo.price_consistency_score * 0.25)).toFixed(1);
+                return `
+                  <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                      <div>
+                        <strong style="color: #60A5FA; font-size: 0.95rem;">${eo.order_number}</strong>
+                        <span style="color: var(--text-muted); font-size: 0.8rem; margin-left: 8px;">(Buyer: ${eo.buyer_company_details ? eo.buyer_company_details.name : 'SME'})</span>
+                      </div>
+                      <span class="badge badge-gold" style="font-size: 0.85rem;">⭐ Score: ${comp}%</span>
+                    </div>
+                    <div style="display: flex; gap: 14px; font-size: 0.78rem; color: #94A3B8; margin-top: 6px;">
+                      <span>⏱️ Timeliness ($W_1$): <strong style="color: #60A5FA;">${eo.timeliness_score}%</strong></span>
+                      <span>📦 Completeness ($W_2$): <strong style="color: #34D399;">${eo.completeness_score}%</strong></span>
+                      <span>💲 Price ($W_3$): <strong style="color: #FBBF24;">${eo.price_consistency_score}%</strong></span>
+                    </div>
+                    ${eo.evaluation_feedback ? `<div style="background: rgba(30, 41, 59, 0.5); padding: 8px 12px; border-radius: 6px; margin-top: 10px; font-size: 0.82rem; color: #F8FAFC; font-style: italic;">"${eo.evaluation_feedback}"</div>` : ''}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    container.innerHTML = html;
+  };
+
+  window.openModal = function(modalId) {
+    if (modalId === 'addProductModal') {
+      const isSme = window.AppState.currentUser?.company ? (window.AppState.currentUser.company.company_type === 'SME' || window.AppState.currentUser.company.company_type === 'BUYER') : true;
+      if (isSme) {
+        window.showToast('Alıcı firmalar (Buyer) malzeme ekleyemez. Yalnızca tedarikçi firmalar kataloglarına malzeme ekleyebilir.', 'warning');
+        return;
+      }
+
+      const catSelect = document.getElementById('prodCategory');
+      if (catSelect) catSelect.innerHTML = window.AppState.categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+      const supSelect = document.getElementById('prodSupplier');
+      const myComp = window.AppState.currentUser?.company;
+      if (supSelect) {
+        if (myComp && myComp.company_type === 'SUPPLIER') {
+          supSelect.innerHTML = `<option value="${myComp.id}">${myComp.name} (Your Verified Company)</option>`;
+          supSelect.disabled = true;
+        } else {
+          supSelect.innerHTML = window.AppState.suppliers.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+          supSelect.disabled = false;
+        }
+      }
+    }
+
+    if (modalId === 'newOrderModal') {
+      const prodSelect = document.getElementById('orderProductSelect');
+      if (prodSelect) {
+        prodSelect.innerHTML = window.AppState.products.map(p => `<option value="${p.id}">${p.name} ($${parseFloat(p.unit_price).toFixed(2)})</option>`).join('');
+      }
+      window.refreshOrderModalDetails();
+    }
+
+    const el = document.getElementById(modalId);
+    if (el) el.classList.add('show');
+  };
+
+  window.closeModal = function(modalId) {
+    const el = document.getElementById(modalId);
+    if (el) el.classList.remove('show');
+  };
+
+  window.openOrderModalWithProduct = function(productId, supplierId) {
+    window.openModal('newOrderModal');
+    const prodSelect = document.getElementById('orderProductSelect');
+    if (prodSelect) {
+      prodSelect.value = productId;
+    }
+    window.refreshOrderModalDetails(productId, supplierId);
+  };
+
+  window.refreshOrderModalDetails = function(targetProdId = null, targetSupplierId = null) {
+    const prodSelect = document.getElementById('orderProductSelect');
+    const selectedProdId = targetProdId || parseInt(prodSelect?.value);
+    const prod = window.AppState.products.find(p => p.id === selectedProdId) || window.AppState.products[0];
+
+    if (!prod) return;
+
+    let supplierId = targetSupplierId || prod.preferred_supplier;
+    if (!supplierId && window.AppState.suppliers.length > 0) {
+      supplierId = window.AppState.suppliers[0].id;
+    }
+
+    const supplierObj = window.AppState.suppliers.find(s => s.id === supplierId) || { name: prod.preferred_supplier_name || 'Verified Supplier', id: supplierId };
+
+    const elVendorName = document.getElementById('orderModalVendorBadge');
+    if (elVendorName) {
+      elVendorName.innerText = `🏭 ${supplierObj.name}`;
+    }
+
+    const elHiddenSup = document.getElementById('orderHiddenSupplierId');
+    if (elHiddenSup) {
+      elHiddenSup.value = supplierId;
+    }
+
+    const unitPrice = parseFloat(prod.unit_price || 0);
+    const qty = parseInt(document.getElementById('orderQuantity')?.value || 1);
+    const totalAmount = unitPrice * qty;
+
+    const elUnitPrice = document.getElementById('orderModalUnitPrice');
+    if (elUnitPrice) elUnitPrice.innerText = `$${unitPrice.toFixed(2)} / ${prod.unit || 'Piece'}`;
+
+    const elTotalAmount = document.getElementById('orderModalTotalAmount');
+    if (elTotalAmount) elTotalAmount.innerText = `$${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+  </script>
+</head>
+<body>
+
+<!-- AUTHENTICATION OVERLAY -->
+<div id="authOverlay" class="auth-overlay" style="display: none;">
+  <div class="auth-card">
+    <div class="auth-header" style="position: relative;">
+      <button type="button" class="close-btn" style="position: absolute; right: 18px; top: 16px; font-size: 1.5rem;" onclick="window.showAuthOverlay(false)" title="Continue to Dashboard">&times;</button>
+      <div class="auth-header-logo">2B</div>
+      <h2>SupplyChain Portal</h2>
+      <p>MIS 498 B2B Supply Chain & Marketplace Portal</p>
+    </div>
+
+    <div class="auth-tabs">
+      <button type="button" class="auth-tab-btn active" id="tabBtnLogin" onclick="window.switchAuthTab('login')">Sign In</button>
+      <button type="button" class="auth-tab-btn" id="tabBtnRegister" onclick="window.switchAuthTab('register')">Register Account</button>
+    </div>
+
+    <!-- 1. LOGIN FORM -->
+    <div id="authLoginForm" class="auth-body">
+      <div class="demo-logins-box" style="margin-top: 0; margin-bottom: 20px; background: rgba(37, 99, 235, 0.1); border-color: rgba(59, 130, 246, 0.4);">
+        <span class="demo-logins-title" style="color: #93C5FD;">⚡ Quick 1-Click Sign In:</span>
+        <div class="demo-chips">
+          <button type="button" class="demo-chip" style="background: #1E3A8A; color: white;" onclick="window.quickFillLogin('buyer_apex', 'password123')">
+            🏢 Enter as Buyer (Apex Precision Ltd. - Alıcı)
+          </button>
+          <button type="button" class="demo-chip" style="background: #854D0E; color: white;" onclick="window.quickFillLogin('supplier_atlas', 'password123')">
+            🏭 Enter as Supplier (Atlas Industrial A.Ş. - Tedarikçi)
+          </button>
+        </div>
+      </div>
+
+      <form id="loginForm" onsubmit="event.preventDefault(); window.performLogin(document.getElementById('loginUsername').value, document.getElementById('loginPassword').value);">
+        <div class="form-group">
+          <label class="form-label">Username</label>
+          <input type="text" id="loginUsername" class="form-control" placeholder="username" required value="buyer_apex">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="loginPassword" class="form-control" placeholder="••••••••" required value="password123">
+        </div>
+        <button type="submit" id="btnLoginSubmit" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 12px; margin-top: 10px; font-size: 0.95rem;">
+          Sign In to Portal &rarr;
+        </button>
+      </form>
+    </div>
+
+    <!-- 2. REGISTER FORM -->
+    <div id="authRegisterForm" class="auth-body" style="display: none;">
+      <form id="registerForm" onsubmit="event.preventDefault(); window.performRegister();">
+        <div class="form-group">
+          <label class="form-label">Select Company Type</label>
+          <div class="role-radio-group">
+            <div class="role-radio-card selected" id="roleCardSME" onclick="window.selectRegisterRole('SME')">
+              <span class="role-radio-title">🏢 Buyer (Alıcı Şirket)</span>
+              <span class="role-radio-desc">Pazaryerinden malzeme al & sipariş ver</span>
+            </div>
+            <div class="role-radio-card" id="roleCardSUPPLIER" onclick="window.selectRegisterRole('SUPPLIER')">
+              <span class="role-radio-title">🏭 Supplier (Tedarikçi)</span>
+              <span class="role-radio-desc">Malzeme sat, emniyet stoku & birim fiyat belirle</span>
+            </div>
+          </div>
+          <input type="hidden" id="regRoleType" value="SME">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Company Name</label>
+          <input type="text" id="regCompanyName" class="form-control" required placeholder="e.g. Özkan Makine Ltd.">
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div class="form-group">
+            <label class="form-label">Contact Person</label>
+            <input type="text" id="regContactPerson" class="form-control" required placeholder="e.g. MERT Günel">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tax ID / Vergi No</label>
+            <input type="text" id="regTaxId" class="form-control" placeholder="e.g. TR-998877">
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" id="regEmail" class="form-control" required placeholder="info@company.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Phone</label>
+            <input type="text" id="regPhone" class="form-control" placeholder="+90 555 0000">
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div class="form-group">
+            <label class="form-label">Username</label>
+            <input type="text" id="regUsername" class="form-control" required placeholder="username">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" id="regPassword" class="form-control" required placeholder="••••••••">
+          </div>
+        </div>
+
+        <button type="submit" id="btnRegSubmit" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 12px; margin-top: 10px;">
+          Create Account & Sign In &rarr;
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APPLICATION UI -->
+<div class="app-container" id="mainAppContainer">
+  <!-- Sidebar Navigation -->
+  <aside class="sidebar">
+    <div class="brand-section">
+      <div class="brand-logo">2B</div>
+      <div class="brand-info">
+        <h2>SupplyChain B2B</h2>
+        <p>Marketplace & Logistics</p>
+      </div>
+    </div>
+
+    <nav class="nav-menu">
+      <!-- 1. Dashboard -->
+      <a href="#" class="nav-item" data-tab="dashboard" onclick="event.preventDefault(); window.switchTab('dashboard');">
+        <div class="nav-item-content">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          <span>Dashboard</span>
+        </div>
+      </a>
+
+      <!-- 2. MY PRODUCTS & STOCK (FOR SUPPLIERS ONLY) -->
+      <a href="#" class="nav-item" data-tab="mystock" id="navItemMyStock" style="display: none;" onclick="event.preventDefault(); window.switchTab('mystock');">
+        <div class="nav-item-content">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          <span>My Products & Stock</span>
+        </div>
+      </a>
+
+      <!-- 3. ALERTS TAB (FOR SUPPLIERS ONLY) -->
+      <a href="#" class="nav-item" data-tab="alerts" id="navItemAlerts" style="display: none;" onclick="event.preventDefault(); window.switchTab('alerts');">
+        <div class="nav-item-content">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          <span>Critical Alerts</span>
+        </div>
+        <span class="badge-alert-count" id="sidebarAlertBadge" style="display: none;">0</span>
+      </a>
+
+      <!-- 4. B2B MARKETPLACE (DIRECTLY ABOVE ORDERS AS REQUESTED) -->
+      <a href="#" class="nav-item active" data-tab="marketplace" id="navItemMarketplace" onclick="event.preventDefault(); window.switchTab('marketplace');">
+        <div class="nav-item-content">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
+          <span style="font-weight: 700; color: #60A5FA;">🛒 B2B Marketplace</span>
+        </div>
+      </a>
+
+      <!-- 5. ORDERS TAB -->
+      <a href="#" class="nav-item" data-tab="orders" onclick="event.preventDefault(); window.switchTab('orders');">
+        <div class="nav-item-content">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+          <span id="navOrdersLabel">My Orders</span>
+        </div>
+        <span class="badge-orders-count" id="sidebarOrdersBadge" style="display: none;">+1</span>
+      </a>
+
+      <!-- 6. SUPPLIER SCORING (FOR SUPPLIERS ONLY) -->
+      <a href="#" class="nav-item" data-tab="scoring" id="navItemScoring" style="display: none;" onclick="event.preventDefault(); window.switchTab('scoring');">
+        <div class="nav-item-content">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
+          <span>My Supplier Scorecard</span>
+        </div>
+      </a>
+
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-card">
+        <div class="user-avatar" id="sidebarAvatar">MG</div>
+        <div class="user-details">
+          <h4 id="sidebarUsername">buyer_apex</h4>
+          <span id="sidebarUserRole">● Connected</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Content Wrapper -->
+  <div class="main-wrapper">
+    <!-- Sticky Topbar -->
+    <header class="topbar">
+      <div class="header-title">
+        <h1 id="headerCompanyTitle">Apex Precision Manufacturing Ltd.</h1>
+      </div>
+
+      <div class="topbar-actions">
+        <div class="user-profile-widget">
+          <div class="user-profile-badge-box">
+            <div class="user-profile-company" id="topbarCompanyName">Apex Precision Manufacturing Ltd.</div>
+            <div class="user-profile-role" id="topbarRoleBadge">🏢 Buyer (SME)</div>
+          </div>
+          <button type="button" class="btn-logout" onclick="window.performLogout()" title="Sign out / Switch account">
+            Sign Out
+          </button>
+        </div>
+
+        <button class="btn btn-primary" id="btnCreatePoTopbar" onclick="window.openModal('newOrderModal')">
+          + Issue Purchase Order
+        </button>
+      </div>
+    </header>
+
+    <!-- Content Area -->
+    <main class="content-area">
+      <!-- 1. B2B MARKETPLACE TAB (ALL COMPANIES MATERIALS & BUY) -->
+      <section id="tab-marketplace" class="tab-pane active">
+        <div class="card-section" style="background: linear-gradient(135deg, rgba(30, 58, 138, 0.4), rgba(15, 23, 42, 0.8)); border: 1px solid rgba(59, 130, 246, 0.3); margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+            <div>
+              <span class="badge badge-info" style="margin-bottom: 6px;">🌐 B2B Enterprise Supply Network</span>
+              <h2 style="font-size: 1.45rem; font-weight: 800; color: #F8FAFC;">
+                All Companies Materials & Parts Marketplace
+              </h2>
+              <p style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 4px;">
+                Explore raw materials, industrial hardware, and electronics supplied by verified companies. Buy with 1-click.
+              </p>
+            </div>
+            <button class="btn btn-primary" id="btnMarketRegisterMaterial" style="display: none;" onclick="window.openModal('addProductModal')">
+              + Register New Material / Malzeme Ekle
+            </button>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin-top: 18px;">
+            <div>
+              <input type="text" id="marketSearchInput" class="form-control" placeholder="🔍 Search material name, SKU, or keyword..." oninput="window.renderMarketplace()">
+            </div>
+            <div>
+              <select id="marketCategoryFilter" class="form-control" onchange="window.renderMarketplace()">
+                <option value="ALL">All Categories</option>
+              </select>
+            </div>
+            <div>
+              <select id="marketSupplierFilter" class="form-control" onchange="window.renderMarketplace()">
+                <option value="ALL">All Supplying Companies</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div id="marketplaceGridContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px;"></div>
+      </section>
+
+      <!-- 2. DASHBOARD TAB -->
+      <section id="tab-dashboard" class="tab-pane">
+        <div id="criticalAlertBannerContainer"></div>
+
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-card-header">
+              <span class="stat-title" id="statTotalSkusLabel">Catalog Materials</span>
+              <div class="stat-icon" style="background: rgba(59, 130, 246, 0.15); color: #60A5FA;">📦</div>
+            </div>
+            <div class="stat-val" id="statTotalSkus">6</div>
+            <div class="stat-sub" id="statTotalSkusSub">Supplier items available</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-card-header">
+              <span class="stat-title" id="statCard2Title">Total Orders Placed</span>
+              <div class="stat-icon" id="statCard2Icon" style="background: rgba(59, 130, 246, 0.15); color: #60A5FA;">📑</div>
+            </div>
+            <div class="stat-val" id="statCard2Val" style="color: #60A5FA;">2</div>
+            <div class="stat-sub" id="statCard2Sub">Purchase orders generated</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-card-header">
+              <span class="stat-title" id="statPendingOrdersLabel">Orders in Pipeline</span>
+              <div class="stat-icon" style="background: rgba(245, 158, 11, 0.15); color: #FBBF24;">⏳</div>
+            </div>
+            <div class="stat-val" id="statPendingOrders">2</div>
+            <div class="stat-sub">Active shipments in transit</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-card-header">
+              <span class="stat-title" id="statValuationLabel">Total Procurement Spend</span>
+              <div class="stat-icon" style="background: rgba(147, 51, 234, 0.15); color: #C084FC;">💰</div>
+            </div>
+            <div class="stat-val" id="statValuation">$3,750.00</div>
+            <div class="stat-sub" id="statValuationSub">Total value of issued orders</div>
+          </div>
+        </div>
+
+        <div class="card-section">
+          <div class="section-header">
+            <h2>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+              Recent Purchase Orders & Invoicing
+            </h2>
+            <button class="btn btn-secondary btn-sm" onclick="window.switchTab('orders')">View All Orders &rarr;</button>
+          </div>
+
+          <div class="table-responsive">
+            <table class="custom-table">
+              <thead>
+                <tr>
+                  <th>Order #</th>
+                  <th>Counterparty</th>
+                  <th>Total Amount</th>
+                  <th>Status</th>
+                  <th>Delivery Due</th>
+                  <th>Export PDF</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardRecentOrdersTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. MY PRODUCTS & STOCK (FOR SUPPLIERS ONLY - WITH LIVE SAFETY THRESHOLD & PRICE EDITING) -->
+      <section id="tab-mystock" class="tab-pane">
+        <div class="card-section">
+          <div class="section-header">
+            <div>
+              <h2>📦 My Company Catalog, Safety Thresholds & Stock Counts</h2>
+              <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">
+                Configure your <b>Safety Thresholds (Emniyet Stoku / Kritik Eşik)</b> to trigger automated shortage alerts, and manage catalog pricing.
+              </p>
+            </div>
+            <button class="btn btn-primary" onclick="window.openModal('addProductModal')">
+              + Add New Catalog Material
+            </button>
+          </div>
+
+          <div class="table-responsive">
+            <table class="custom-table">
+              <thead>
+                <tr>
+                  <th>Material & SKU</th>
+                  <th>Category</th>
+                  <th>Current Stock (Adjust)</th>
+                  <th>Safety Threshold (Eşik Belirle)</th>
+                  <th>Unit Price ($) (Edit & Save)</th>
+                  <th>Warehouse Location</th>
+                  <th>Restock Action</th>
+                </tr>
+              </thead>
+              <tbody id="myStockTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. ALERTS TAB (FOR SUPPLIERS ONLY - SHORTAGE & DEFICIT WARNINGS) -->
+      <section id="tab-alerts" class="tab-pane">
+        <div class="card-section">
+          <div class="section-header">
+            <div>
+              <h2>🚨 Critical Stock Shortages & Safety Threshold Alerts</h2>
+              <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">
+                Materials where current inventory is <b>less than or equal to your configured Safety Threshold</b>. Adjust threshold or restock below.
+              </p>
+            </div>
+          </div>
+
+          <div id="alertsListContainer" style="margin-top: 16px;"></div>
+        </div>
+      </section>
+
+      <!-- 5. ORDERS & INVOICES TAB -->
+      <section id="tab-orders" class="tab-pane">
+        <div class="card-section">
+          <div class="section-header">
+            <div>
+              <h2 id="ordersSectionTitle">📑 B2B Purchase Orders & Automated Invoicing Hub</h2>
+              <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">
+                Digitized document workflow with automated PDF invoice & quotation generation (`ReportLab` engine).
+              </p>
+            </div>
+            <button class="btn btn-primary" onclick="window.openModal('newOrderModal')">
+              + New Purchase Order
+            </button>
+          </div>
+
+          <div class="table-responsive">
+            <table class="custom-table">
+              <thead>
+                <tr>
+                  <th>Order Ref & Rating</th>
+                  <th>Counterparty</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Expected Date</th>
+                  <th>Actual Delivered</th>
+                  <th>Actions & Evaluation ($W_1, W_2, W_3$)</th>
+                </tr>
+              </thead>
+              <tbody id="ordersTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. SUPPLIER SCORING TAB (FOR SUPPLIERS ONLY) -->
+      <section id="tab-scoring" class="tab-pane">
+        <div class="algorithm-box">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <div>
+              <h2 style="font-size: 1.15rem; font-weight: 700;">⚙️ Weighted Multi-Criteria Performance Scorecard</h2>
+              <p style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 2px;">
+                Your score is evaluated dynamically from buyer order reviews based on delivery timeliness ($W_1$), order completeness ($W_2$), and price consistency ($W_3$).
+              </p>
+            </div>
+          </div>
+
+          <div class="formula-display">
+            <strong>Evaluation Model:</strong><br/>
+            $$\text{Performance Score} = (0.40 \times \text{Timeliness}) + (0.35 \times \text{Order Completeness}) + (0.25 \times \text{Price Consistency})$$
+          </div>
+        </div>
+
+        <div id="supplierLeaderboardContainer"></div>
+      </section>
+
+      </section>
+    </main>
+  </div>
+</div>
+
+<!-- MODALS -->
+
+<!-- 1. Add Product Modal -->
+<div id="addProductModal" class="modal-backdrop">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h3>Register New Material to Marketplace Catalog</h3>
+      <button class="close-btn" onclick="window.closeModal('addProductModal')">&times;</button>
+    </div>
+    <form id="addProductForm">
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Material Name</label>
+          <input type="text" id="prodName" class="form-control" required placeholder="e.g. High-Torque Stepper Motor 24V">
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label class="form-label">SKU Code</label>
+            <input type="text" id="prodSku" class="form-control" required placeholder="e.g. MOT-STP-24V">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Category</label>
+            <select id="prodCategory" class="form-control" required></select>
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label class="form-label">Unit of Measure</label>
+            <input type="text" id="prodUnit" class="form-control" value="Pieces" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Unit Price ($)</label>
+            <input type="number" id="prodPrice" step="0.01" class="form-control" required value="45.00">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Supplying Vendor Company</label>
+          <select id="prodSupplier" class="form-control"></select>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+          <div class="form-group">
+            <label class="form-label">Initial Stock</label>
+            <input type="number" id="prodInitialStock" class="form-control" value="50">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Safety Threshold (Kritik Eşik)</label>
+            <input type="number" id="prodThreshold" class="form-control" value="20">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Reorder Qty</label>
+            <input type="number" id="prodReorderQty" class="form-control" value="100">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Warehouse Location</label>
+          <input type="text" id="prodLocation" class="form-control" value="Vendor Hub - Zone B">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="window.closeModal('addProductModal')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save to Marketplace</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 2. Create Purchase Order Modal -->
+<div id="newOrderModal" class="modal-backdrop">
+  <div class="modal-card" style="max-width: 560px;">
+    <div class="modal-header" style="background: linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(30, 41, 59, 0.9));">
+      <div>
+        <h3 style="color: #93C5FD;">🛒 Issue Purchase Order / Malzeme Satın Al</h3>
+        <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">Direct purchase from supplying vendor with automated notification & PO PDF</p>
+      </div>
+      <button class="close-btn" onclick="window.closeModal('newOrderModal')">&times;</button>
+    </div>
+    <form id="newOrderForm">
+      <div class="modal-body" style="padding: 24px;">
+        <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 14px 18px; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Receiving Supplier</span>
+            <strong id="orderModalVendorBadge" style="color: #60A5FA; font-size: 0.95rem;">🏭 Atlas Industrial Components A.S.</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed var(--border-subtle); padding-top: 8px;">
+            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Agreed Unit Price</span>
+            <strong id="orderModalUnitPrice" style="color: #34D399; font-size: 1.05rem;">$18.75 / Sets</strong>
+          </div>
+        </div>
+
+        <input type="hidden" id="orderHiddenSupplierId" value="14">
+
+        <div class="form-group">
+          <label class="form-label">Material to Buy</label>
+          <select id="orderProductSelect" class="form-control" required onchange="window.refreshOrderModalDetails()"></select>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div class="form-group">
+            <label class="form-label">Order Quantity</label>
+            <input type="number" id="orderQuantity" class="form-control" value="50" min="1" required oninput="window.refreshOrderModalDetails()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Total Calculated Spend</label>
+            <div id="orderModalTotalAmount" style="padding: 10px 14px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; font-weight: 800; color: #34D399; font-size: 1.15rem; text-align: right;">
+              $937.50
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Delivery Notes / Destination Address</label>
+          <textarea id="orderNotes" class="form-control" rows="2" placeholder="e.g. Deliver to Nilüfer OSB Plant 2, Loading Bay 4 within 3 business days."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="window.closeModal('newOrderModal')">Cancel</button>
+        <button type="submit" class="btn btn-primary" style="background: #2563EB; font-weight: 700; padding: 10px 20px;">
+          🚀 Send Order to Supplier / Siparişi Gönder
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 3. BUYER EVALUATION MODAL (W1, W2, W3) -->
+<div id="evaluateOrderModal" class="modal-backdrop">
+  <div class="modal-card" style="max-width: 580px;">
+    <div class="modal-header" style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(30, 41, 59, 0.9));">
+      <div>
+        <h3 id="evalOrderTitle" style="color: #FBBF24;">⭐ Evaluate Supplier Performance</h3>
+        <p id="evalSupplierName" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">Supplier Evaluation</p>
+      </div>
+      <button class="close-btn" onclick="window.closeModal('evaluateOrderModal')">&times;</button>
+    </div>
+    
+    <div class="modal-body" style="padding: 24px;">
+      <div style="background: rgba(15, 23, 42, 0.6); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border-subtle); margin-bottom: 20px; font-size: 0.82rem; color: var(--text-secondary);">
+        Rate the supplier's fulfillment accuracy across the 3 core mathematical criteria. Your rating dynamically updates the supplier's scorecard and tier rank.
+      </div>
+
+      <!-- W1: Timeliness -->
+      <div style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <label class="form-label" style="margin: 0; font-weight: 700; color: #60A5FA;">
+            ⏱️ Delivery Timeliness ($W_1$ - 40%)
+          </label>
+          <strong id="evalValW1" style="color: #60A5FA; font-size: 1.05rem;">100%</strong>
+        </div>
+        <input type="range" id="evalSliderW1" min="0" max="100" step="5" value="100" class="form-control" style="padding: 0; height: 8px;" oninput="document.getElementById('evalValW1').innerText = this.value + '%'">
+        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 4px;">Did the supplier deliver strictly on or before the committed due date?</span>
+      </div>
+
+      <!-- W2: Completeness -->
+      <div style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <label class="form-label" style="margin: 0; font-weight: 700; color: #34D399;">
+            📦 Order Completeness ($W_2$ - 35%)
+          </label>
+          <strong id="evalValW2" style="color: #34D399; font-size: 1.05rem;">100%</strong>
+        </div>
+        <input type="range" id="evalSliderW2" min="0" max="100" step="5" value="100" class="form-control" style="padding: 0; height: 8px;" oninput="document.getElementById('evalValW2').innerText = this.value + '%'">
+        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 4px;">Were all requested quantities delivered complete without shortages or damaged goods?</span>
+      </div>
+
+      <!-- W3: Price Consistency -->
+      <div style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <label class="form-label" style="margin: 0; font-weight: 700; color: #FBBF24;">
+            💲 Price Consistency ($W_3$ - 25%)
+          </label>
+          <strong id="evalValW3" style="color: #FBBF24; font-size: 1.05rem;">100%</strong>
+        </div>
+        <input type="range" id="evalSliderW3" min="0" max="100" step="5" value="100" class="form-control" style="padding: 0; height: 8px;" oninput="document.getElementById('evalValW3').innerText = this.value + '%'">
+        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 4px;">Did invoice totals match agreed catalog pricing without unexpected price hikes?</span>
+      </div>
+
+      <!-- Feedback Notes -->
+      <div class="form-group" style="margin-bottom: 0;">
+        <label class="form-label">Review Feedback / Performance Notes (Optional)</label>
+        <textarea id="evalFeedbackNotes" class="form-control" rows="2" placeholder="e.g. Flawless shipment, arrived 1 day ahead of schedule with perfect packaging."></textarea>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="window.closeModal('evaluateOrderModal')">Cancel</button>
+      <button type="button" class="btn btn-primary" style="background: #F59E0B; border-color: #D97706; color: black; font-weight: 700;" onclick="window.submitOrderEvaluation()">
+        ✓ Submit Rating & Update Supplier Score
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- BOTTOM INITIALIZATION SCRIPT -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const addProdForm = document.getElementById('addProductForm');
+  if (addProdForm) {
+    addProdForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const isSme = window.AppState.currentUser?.company ? (window.AppState.currentUser.company.company_type === 'SME' || window.AppState.currentUser.company.company_type === 'BUYER') : true;
+      if (isSme) {
+        window.showToast('Alıcı firmalar (Buyer) malzeme ekleyemez. Yalnızca tedarikçi firmalar kataloglarına malzeme ekleyebilir.', 'danger');
+        return;
+      }
+
+      const myComp = window.AppState.currentUser?.company;
+      let supplierId = (myComp && myComp.company_type === 'SUPPLIER') 
+        ? parseInt(myComp.id) 
+        : parseInt(document.getElementById('prodSupplier')?.value || 14);
+
+      const productPayload = {
+        name: document.getElementById('prodName')?.value,
+        sku: document.getElementById('prodSku')?.value,
+        category: parseInt(document.getElementById('prodCategory')?.value || 1),
+        unit: document.getElementById('prodUnit')?.value || 'Pieces',
+        unit_price: parseFloat(document.getElementById('prodPrice')?.value || 0),
+        preferred_supplier: supplierId
+      };
+
+      try {
+        const prodRes = await fetch(`${API_BASE}/inventory/products/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(productPayload)
+        });
+        const createdProd = await prodRes.json();
+
+        await fetch(`${API_BASE}/inventory/items/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            company: supplierId,
+            product_id: createdProd.id,
+            current_stock: parseInt(document.getElementById('prodInitialStock')?.value || 0),
+            critical_threshold: parseInt(document.getElementById('prodThreshold')?.value || 20),
+            reorder_quantity: parseInt(document.getElementById('prodReorderQty')?.value || 100),
+            warehouse_location: document.getElementById('prodLocation')?.value || 'Main Warehouse'
+          })
+        });
+
+        window.showToast('Yeni malzeme kataloğunuza ve pazaryerine başarıyla eklendi!', 'success');
+        window.closeModal('addProductModal');
+        await window.fetchInventory();
+        await window.fetchProducts();
+        window.renderDashboard();
+        window.renderMarketplace();
+        window.renderMyStockTable();
+        window.renderAlertsTab();
+      } catch (err) {
+        window.showToast('Malzeme ekleme sırasında hata oluştu.', 'danger');
+      }
+    });
+  }
+
+  const orderForm = document.getElementById('newOrderForm');
+  if (orderForm) {
+    orderForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const prodId = parseInt(document.getElementById('orderProductSelect')?.value);
+      const prod = window.AppState.products.find(p => p.id === prodId);
+      
+      let supplierId = parseInt(document.getElementById('orderHiddenSupplierId')?.value);
+      if (!supplierId && prod) {
+        supplierId = prod.preferred_supplier;
+      }
+      if (!supplierId) supplierId = 14;
+
+      const qty = parseInt(document.getElementById('orderQuantity')?.value || 1);
+      const buyerCompId = window.AppState.currentUser?.company?.id || 13;
+      const supplierObj = window.AppState.suppliers.find(s => s.id === supplierId);
+      const supplierName = supplierObj ? supplierObj.name : (prod ? prod.preferred_supplier_name : 'Supplier');
+
+      const poNumber = `PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const orderPayload = {
+        order_number: poNumber,
+        order_type: 'PURCHASE_ORDER',
+        buyer_company: buyerCompId,
+        supplier_company: supplierId,
+        status: 'PENDING_SUPPLIER',
+        notes: document.getElementById('orderNotes')?.value || '',
+        items: [{ product_id: prodId, quantity_requested: qty, agreed_unit_price: prod ? prod.unit_price : 10.00 }]
+      };
+
+      try {
+        const res = await fetch(`${API_BASE}/orders/purchase-orders/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(orderPayload)
+        });
+        if (res.ok) {
+          window.showToast(`Order ${poNumber} sent to ${supplierName}! Awaiting supplier confirmation.`, 'success');
+          window.closeModal('newOrderModal');
+          await window.fetchOrders();
+          window.renderDashboard();
+          window.renderOrdersTable();
+          window.switchTab('orders');
+        } else {
+          const errData = await res.json();
+          window.showToast(errData.error || 'Failed to place order', 'danger');
+        }
+      } catch (err) {
+        window.showToast('Error submitting order', 'danger');
+      }
+    });
+  }
+
+  // Initial load & session restoration
+  window.initUserSession();
+});
+</script>
+</body>
+</html>
