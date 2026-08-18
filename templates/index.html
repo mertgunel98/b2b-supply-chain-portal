@@ -1464,8 +1464,21 @@
       elHiddenSup.value = supplierId;
     }
 
+    // Find available stock
+    const invItem = window.AppState.inventory.find(i => (i.product.id === prod.id || i.product === prod.id) && (i.company?.id === supplierId || i.company === supplierId)) || window.AppState.inventory.find(i => i.product.id === prod.id);
+    const availableStock = invItem ? invItem.current_stock : 0;
+
+    const elStockVal = document.getElementById('orderModalAvailableStockVal');
+    if (elStockVal) elStockVal.innerText = `${availableStock} ${prod.unit || 'Pieces'}`;
+
+    const qtyInput = document.getElementById('orderQuantity');
+    if (qtyInput) {
+      qtyInput.max = availableStock;
+      qtyInput.min = 1;
+    }
+
     const unitPrice = parseFloat(prod.unit_price || 0);
-    const qty = parseInt(document.getElementById('orderQuantity')?.value || 1);
+    const qty = parseInt(qtyInput?.value || 1);
     const totalAmount = unitPrice * qty;
 
     const elUnitPrice = document.getElementById('orderModalUnitPrice');
@@ -1473,6 +1486,35 @@
 
     const elTotalAmount = document.getElementById('orderModalTotalAmount');
     if (elTotalAmount) elTotalAmount.innerText = `$${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    const elWarning = document.getElementById('orderStockWarning');
+    const submitBtn = document.getElementById('btnSubmitNewOrder');
+
+    if (availableStock <= 0) {
+      if (elWarning) {
+        elWarning.innerText = '❌ Bu ürün için tedarikçinin stoku tükenmiştir!';
+        elWarning.style.display = 'block';
+      }
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.style.opacity = '0.5';
+      }
+    } else if (qty > availableStock) {
+      if (elWarning) {
+        elWarning.innerText = `⚠️ Talep edilen miktar (${qty}) mevcut stoktan (${availableStock} ${prod.unit || 'adet'}) fazladır!`;
+        elWarning.style.display = 'block';
+      }
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.style.opacity = '0.5';
+      }
+    } else {
+      if (elWarning) elWarning.style.display = 'none';
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.style.opacity = '1';
+      }
+    }
   };
   </script>
 </head>
@@ -1993,6 +2035,10 @@
             <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Agreed Unit Price</span>
             <strong id="orderModalUnitPrice" style="color: #34D399; font-size: 1.05rem;">$18.75 / Sets</strong>
           </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed var(--border-subtle); padding-top: 8px; margin-top: 8px;">
+            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">📦 Available Supplier Stock</span>
+            <strong id="orderModalAvailableStockVal" style="color: #60A5FA; font-size: 0.95rem;">50 Units</strong>
+          </div>
         </div>
 
         <input type="hidden" id="orderHiddenSupplierId" value="14">
@@ -2006,6 +2052,7 @@
           <div class="form-group">
             <label class="form-label">Order Quantity</label>
             <input type="number" id="orderQuantity" class="form-control" value="50" min="1" required oninput="window.refreshOrderModalDetails()">
+            <div id="orderStockWarning" style="display: none; color: #F87171; font-size: 0.75rem; font-weight: 600; margin-top: 5px;"></div>
           </div>
           <div class="form-group">
             <label class="form-label">Total Calculated Spend</label>
@@ -2022,7 +2069,7 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="window.closeModal('newOrderModal')">Cancel</button>
-        <button type="submit" class="btn btn-primary" style="background: #2563EB; font-weight: 700; padding: 10px 20px;">
+        <button type="submit" class="btn btn-primary" id="btnSubmitNewOrder" style="background: #2563EB; font-weight: 700; padding: 10px 20px;">
           🚀 Send Order to Supplier / Siparişi Gönder
         </button>
       </div>
@@ -2178,6 +2225,18 @@ document.addEventListener('DOMContentLoaded', () => {
       const buyerCompId = window.AppState.currentUser?.company?.id || 13;
       const supplierObj = window.AppState.suppliers.find(s => s.id === supplierId);
       const supplierName = supplierObj ? supplierObj.name : (prod ? prod.preferred_supplier_name : 'Supplier');
+
+      // Check available stock
+      const invItem = window.AppState.inventory.find(i => (i.product.id === prodId || i.product === prodId) && (i.company?.id === supplierId || i.company === supplierId)) || window.AppState.inventory.find(i => i.product.id === prodId);
+      const availableStock = invItem ? invItem.current_stock : 0;
+      if (qty > availableStock) {
+        window.showToast(`Yetersiz Stok! Talep edilen miktar (${qty}), tedarikçinin mevcut stok miktarını (${availableStock}) aşıyor.`, 'danger');
+        return;
+      }
+      if (qty <= 0) {
+        window.showToast('Lütfen en az 1 adet sipariş miktarı girin.', 'warning');
+        return;
+      }
 
       const poNumber = `PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
