@@ -2027,6 +2027,12 @@
       return;
     }
 
+    window.AppState.activeOrderSupplierId = targetSupId ? parseInt(targetSupId) : null;
+    const elHiddenSup = document.getElementById('orderHiddenSupplierId');
+    if (elHiddenSup) {
+      elHiddenSup.value = targetSupId || '';
+    }
+
     const prodSelect = document.getElementById('orderProductSelect');
     if (prodSelect) {
       prodSelect.innerHTML = `<option value="${prod.id}" selected>${prod.name} (${prod.sku || 'SKU'})</option>`;
@@ -2050,19 +2056,35 @@
   window.refreshOrderModalDetails = function(targetProdId = null, targetSupplierId = null) {
     const prodSelect = document.getElementById('orderProductSelect');
     const selectedProdId = targetProdId || parseInt(prodSelect?.value);
+    
+    // Priority: targetSupplierId -> existing hidden input -> AppState.activeOrderSupplierId
+    let supplierId = targetSupplierId;
+    if (!supplierId) {
+      const hiddenVal = document.getElementById('orderHiddenSupplierId')?.value;
+      if (hiddenVal) supplierId = parseInt(hiddenVal);
+    }
+    if (!supplierId && window.AppState.activeOrderSupplierId) {
+      supplierId = window.AppState.activeOrderSupplierId;
+    }
+
     const prod = window.AppState.products.find(p => parseInt(p.id) === parseInt(selectedProdId)) ||
                  (window.AppState.inventory.find(i => parseInt(i.product.id || i.product) === parseInt(selectedProdId))?.product) ||
                  window.AppState.products[0];
 
     if (!prod) return;
 
-    let supplierId = targetSupplierId;
-    if (!supplierId && prod) {
+    if (!supplierId) {
       const invMatch = window.AppState.inventory.find(i => parseInt(i.product?.id || i.product) === parseInt(selectedProdId));
-      supplierId = invMatch ? (invMatch.company?.id || invMatch.company) : (prod.preferred_supplier?.id || prod.preferred_supplier);
+      supplierId = invMatch ? parseInt(invMatch.company?.id || invMatch.company) : parseInt(prod.preferred_supplier?.id || prod.preferred_supplier);
     }
     if (!supplierId && window.AppState.suppliers && window.AppState.suppliers.length > 0) {
       supplierId = window.AppState.suppliers[0].id;
+    }
+
+    window.AppState.activeOrderSupplierId = supplierId;
+    const elHiddenSup = document.getElementById('orderHiddenSupplierId');
+    if (elHiddenSup) {
+      elHiddenSup.value = supplierId;
     }
 
     const supplierObj = window.AppState.suppliers.find(s => parseInt(s.id) === parseInt(supplierId)) || { name: prod.preferred_supplier_name || 'Verified Supplier', id: supplierId };
@@ -2072,14 +2094,9 @@
       elVendorName.innerText = `🏭 ${supplierObj.name}`;
     }
 
-    const elHiddenSup = document.getElementById('orderHiddenSupplierId');
-    if (elHiddenSup) {
-      elHiddenSup.value = supplierId;
-    }
-
-    // Find available stock
-    const invItem = window.AppState.inventory.find(i => (parseInt(i.product.id || i.product) === parseInt(prod.id)) && (parseInt(i.company?.id || i.company) === parseInt(supplierId))) ||
-                    window.AppState.inventory.find(i => parseInt(i.product.id || i.product) === parseInt(prod.id));
+    // Find available stock for THIS specific supplier
+    const invItem = window.AppState.inventory.find(i => (parseInt(i.product.id || i.product) === parseInt(selectedProdId)) && (parseInt(i.company?.id || i.company) === parseInt(supplierId))) ||
+                    window.AppState.inventory.find(i => parseInt(i.product.id || i.product) === parseInt(selectedProdId));
     const availableStock = invItem ? parseInt(invItem.current_stock) : 0;
 
     const elStockVal = document.getElementById('orderModalAvailableStockVal');
@@ -2110,7 +2127,7 @@
 
     if (availableStock <= 0) {
       if (elWarning) {
-        elWarning.innerText = '❌ Bu ürün için tedarikçinin stoku tükenmiştir!';
+        elWarning.innerText = `❌ ${supplierObj.name} bünyesinde bu ürünün stoku tükenmiştir!`;
         elWarning.style.display = 'block';
       }
       if (submitBtn) {
@@ -2119,7 +2136,7 @@
       }
     } else if (qty > availableStock) {
       if (elWarning) {
-        elWarning.innerText = `⚠️ Talep edilen miktar (${qty}) mevcut stoktan (${availableStock} ${prod.unit || 'adet'}) fazladır!`;
+        elWarning.innerText = `⚠️ Talep edilen miktar (${qty}), ${supplierObj.name} mevcut stokundan (${availableStock} ${prod.unit || 'adet'}) fazladır!`;
         elWarning.style.display = 'block';
       }
       if (submitBtn) {
@@ -2940,7 +2957,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const prodId = parseInt(document.getElementById('orderProductSelect')?.value);
       const prod = window.AppState.products.find(p => p.id === prodId);
       
-      let supplierId = parseInt(document.getElementById('orderHiddenSupplierId')?.value);
+      let supplierId = parseInt(document.getElementById('orderHiddenSupplierId')?.value) || window.AppState.activeOrderSupplierId;
       if (!supplierId && prod) {
         const invMatch = window.AppState.inventory.find(i => parseInt(i.product?.id || i.product) === parseInt(prodId));
         supplierId = invMatch ? (invMatch.company?.id || invMatch.company) : (prod.preferred_supplier?.id || prod.preferred_supplier);
