@@ -1993,7 +1993,7 @@
     container.innerHTML = html;
   };
 
-  window.openModal = function(modalId) {
+  window.openModal = function(modalId, populateProducts = true) {
     if (modalId === 'addProductModal') {
       const isSme = window.AppState.currentUser?.company ? (window.AppState.currentUser.company.company_type === 'SME' || window.AppState.currentUser.company.company_type === 'BUYER') : true;
       if (isSme) {
@@ -2029,8 +2029,10 @@
       }
       if (populateProducts) {
         const prodSelect = document.getElementById('orderProductSelect');
-        if (prodSelect) {
-          prodSelect.innerHTML = window.AppState.products.map(p => `<option value="${p.id}">${p.name} ($${parseFloat(p.unit_price).toFixed(2)})</option>`).join('');
+        if (prodSelect && window.AppState.products && window.AppState.products.length > 0) {
+          prodSelect.innerHTML = window.AppState.products.map(p => `<option value="${p.id}">${p.name} ($${parseFloat(p.unit_price || 0).toFixed(2)})</option>`).join('');
+          const firstProdId = window.AppState.products[0].id;
+          prodSelect.value = firstProdId;
         }
         window.refreshOrderModalDetails();
       }
