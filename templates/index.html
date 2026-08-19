@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/portal.css?v=20260818a">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <!-- SCRIPT IN HEAD: ALL FUNCTIONS DEFINED GLOBALLY BEFORE DOM PARSE -->
   <script>
@@ -321,11 +322,19 @@
     const activePane = document.getElementById(`tab-${tabId}`);
     if (activePane) activePane.classList.add('active');
 
+    if (tabId === 'dashboard') {
+      window.renderDashboard();
+      window.renderCharts();
+      window.renderAiAdvisor();
+    }
     if (tabId === 'marketplace') window.renderMarketplace();
     if (tabId === 'mystock') window.renderMyStockTable();
     if (tabId === 'alerts') window.renderAlertsTab();
     if (tabId === 'orders') window.renderOrdersTable();
-    if (tabId === 'scoring') window.simulateScores();
+    if (tabId === 'scoring') {
+      window.simulateScores();
+      window.renderCharts();
+    }
   };
 
   window.loadAllData = async function() {
@@ -609,6 +618,412 @@
         `).join('');
       }
     }
+
+    window.renderCharts();
+    window.renderAiAdvisor();
+  };
+
+  // -------------------------------------------------------------------------
+  // 1.1 SUPPLY CHAIN ANALYTICS & CHARTS (Chart.js Engine)
+  // -------------------------------------------------------------------------
+  window.renderCharts = function() {
+    if (typeof Chart === 'undefined') return;
+
+    const isSme = window.AppState.currentUser?.company ? (window.AppState.currentUser.company.company_type === 'SME' || window.AppState.currentUser.company.company_type === 'BUYER') : true;
+
+    // 1. Line Chart: Monthly Spend / Order Flow Trajectory
+    const trendCanvas = document.getElementById('spendTrendChart');
+    if (trendCanvas) {
+      const trendCtx = trendCanvas.getContext('2d');
+      if (window.AppState.spendTrendChartInstance) {
+        window.AppState.spendTrendChartInstance.destroy();
+      }
+
+      const months = ['March', 'April', 'May', 'June', 'July', 'August'];
+      const buyerData = [1240, 1850, 2400, 3100, 2900, 3750];
+      const supplierData = [3400, 4200, 3900, 5600, 6200, 7150];
+      const chartValues = isSme ? buyerData : supplierData;
+
+      const titleElem = document.getElementById('spendTrendChartTitle');
+      if (titleElem) {
+        titleElem.innerText = isSme ? 'Monthly Procurement Spend Trajectory ($)' : 'Monthly Order Fulfillment Revenue ($)';
+      }
+
+      window.AppState.spendTrendChartInstance = new Chart(trendCtx, {
+        type: 'line',
+        data: {
+          labels: months,
+          datasets: [{
+            label: isSme ? 'Procurement Spend ($)' : 'Supplier Revenue ($)',
+            data: chartValues,
+            borderColor: '#3B82F6',
+            backgroundColor: 'rgba(59, 130, 246, 0.18)',
+            fill: true,
+            tension: 0.38,
+            pointBackgroundColor: '#60A5FA',
+            pointBorderColor: '#1E293B',
+            pointBorderWidth: 2,
+            pointRadius: 5,
+            pointHoverRadius: 7
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              titleColor: '#F8FAFC',
+              bodyColor: '#60A5FA',
+              borderColor: 'rgba(59, 130, 246, 0.4)',
+              borderWidth: 1,
+              callbacks: {
+                label: (ctx) => ` $${ctx.parsed.y.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(51, 65, 85, 0.25)' },
+              ticks: { color: '#94A3B8', font: { family: 'Inter', size: 11 } }
+            },
+            y: {
+              grid: { color: 'rgba(51, 65, 85, 0.25)' },
+              ticks: {
+                color: '#94A3B8',
+                font: { family: 'Inter', size: 11 },
+                callback: (v) => `$${v >= 1000 ? (v/1000) + 'k' : v}`
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // 2. Donut Chart: Category Spend / Allocation
+    const catCanvas = document.getElementById('categorySpendChart');
+    if (catCanvas) {
+      const catCtx = catCanvas.getContext('2d');
+      if (window.AppState.categorySpendChartInstance) {
+        window.AppState.categorySpendChartInstance.destroy();
+      }
+
+      const categories = ['Mechanical & Hardware', 'Electronics & Automation', 'Packaging Supplies', 'Raw Metals & Polymers'];
+      const catSpend = isSme ? [1650, 1200, 480, 420] : [2450, 3100, 890, 710];
+
+      window.AppState.categorySpendChartInstance = new Chart(catCtx, {
+        type: 'doughnut',
+        data: {
+          labels: categories,
+          datasets: [{
+            data: catSpend,
+            backgroundColor: [
+              '#3B82F6',
+              '#10B981',
+              '#F59E0B',
+              '#8B5CF6'
+            ],
+            borderColor: '#0F172A',
+            borderWidth: 3,
+            hoverOffset: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '68%',
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: {
+                color: '#CBD5E1',
+                boxWidth: 11,
+                padding: 12,
+                font: { family: 'Inter', size: 11 }
+              }
+            },
+            tooltip: {
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              titleColor: '#F8FAFC',
+              bodyColor: '#34D399',
+              borderColor: 'rgba(16, 185, 129, 0.4)',
+              borderWidth: 1,
+              callbacks: {
+                label: (ctx) => ` $${ctx.parsed.toLocaleString('en-US', { minimumFractionDigits: 2 })} (${((ctx.parsed / catSpend.reduce((a,b)=>a+b,0))*100).toFixed(0)}%)`
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // 3. Radar Chart on Supplier Scoring Tab
+    const radarCanvas = document.getElementById('supplierRadarChart');
+    if (radarCanvas) {
+      const radarCtx = radarCanvas.getContext('2d');
+      if (window.AppState.supplierRadarChartInstance) {
+        window.AppState.supplierRadarChartInstance.destroy();
+      }
+
+      window.AppState.supplierRadarChartInstance = new Chart(radarCtx, {
+        type: 'radar',
+        data: {
+          labels: ['Timeliness (W1: 40%)', 'Completeness (W2: 35%)', 'Price Consistency (W3: 25%)', 'Lead-Time Fulfillment', 'Quality Compliance'],
+          datasets: [
+            {
+              label: 'Atlas Industrial',
+              data: [96, 94, 98, 92, 95],
+              borderColor: '#3B82F6',
+              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+              pointBackgroundColor: '#3B82F6'
+            },
+            {
+              label: 'TeknoSupply Electronics',
+              data: [94, 98, 92, 95, 96],
+              borderColor: '#10B981',
+              backgroundColor: 'rgba(16, 185, 129, 0.2)',
+              pointBackgroundColor: '#10B981'
+            },
+            {
+              label: 'Global Pack & Polymers',
+              data: [91, 89, 95, 88, 92],
+              borderColor: '#F59E0B',
+              backgroundColor: 'rgba(245, 158, 11, 0.2)',
+              pointBackgroundColor: '#F59E0B'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            r: {
+              angleLines: { color: 'rgba(51, 65, 85, 0.3)' },
+              grid: { color: 'rgba(51, 65, 85, 0.3)' },
+              pointLabels: { color: '#CBD5E1', font: { family: 'Inter', size: 11, weight: 'bold' } },
+              ticks: { display: false, min: 50, max: 100 }
+            }
+          },
+          plugins: {
+            legend: {
+              labels: { color: '#CBD5E1', font: { family: 'Inter', size: 11 } }
+            }
+          }
+        }
+      });
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 1.2 AI DEMAND FORECASTING & REORDER ADVISOR
+  // -------------------------------------------------------------------------
+  window.renderAiAdvisor = function() {
+    const aiContainer = document.getElementById('aiInsightContainer');
+    if (!aiContainer) return;
+
+    const isSme = window.AppState.currentUser?.company ? (window.AppState.currentUser.company.company_type === 'SME' || window.AppState.currentUser.company.company_type === 'BUYER') : true;
+
+    if (isSme) {
+      aiContainer.innerHTML = `
+        <div class="card-section" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(15, 23, 42, 0.85)); border: 1px solid rgba(16, 185, 129, 0.35); margin-bottom: 22px; padding: 18px 22px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+            <div style="display: flex; align-items: center; gap: 14px;">
+              <div style="font-size: 1.8rem; background: rgba(16, 185, 129, 0.2); padding: 10px; border-radius: 12px; border: 1px solid rgba(16, 185, 129, 0.4);">
+                🤖
+              </div>
+              <div>
+                <h3 style="font-size: 1.05rem; font-weight: 700; color: #6EE7B7; display: flex; align-items: center; gap: 8px;">
+                  AI Demand Forecasting & Procurement Optimization
+                  <span class="badge badge-healthy" style="font-size: 0.68rem;">Predictive Run-Rate</span>
+                </h3>
+                <p style="font-size: 0.82rem; color: #CBD5E1; margin-top: 3px;">
+                  Tedarik analitiği: <b>STM32-F407 Microcontroller</b> ve <b>6205-2RS Rulman</b> parçalarında tüketim hızınız artıyor. Tedarik süresi gecikmelerini önlemek için <b>85 adetlik</b> ikmal siparişi önerilir.
+                </p>
+              </div>
+            </div>
+            <button class="btn btn-primary" style="background: #059669; border-color: #10B981; font-weight: 700;" onclick="window.switchTab('marketplace')">
+              ⚡ Akıllı Sipariş Ver (Marketplace) &rarr;
+            </button>
+          </div>
+        </div>
+      `;
+    } else {
+      aiContainer.innerHTML = `
+        <div class="card-section" style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(15, 23, 42, 0.85)); border: 1px solid rgba(59, 130, 246, 0.35); margin-bottom: 22px; padding: 18px 22px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+            <div style="display: flex; align-items: center; gap: 14px;">
+              <div style="font-size: 1.8rem; background: rgba(59, 130, 246, 0.2); padding: 10px; border-radius: 12px; border: 1px solid rgba(59, 130, 246, 0.4);">
+                📊
+              </div>
+              <div>
+                <h3 style="font-size: 1.05rem; font-weight: 700; color: #93C5FD; display: flex; align-items: center; gap: 8px;">
+                  Supplier Yield & Demand Velocity Advisor
+                  <span class="badge badge-info" style="font-size: 0.68rem;">Capacity Insights</span>
+                </h3>
+                <p style="font-size: 0.82rem; color: #CBD5E1; margin-top: 3px;">
+                  Katalog analitiği: Elektronik ve Mekanik parçalarınıza gelen alıcı talep yoğunluğu %18 yükseldi. Emniyet stok eşiğinizi <b>25 adet</b> seviyesine yükseltmeniz önerilir.
+                </p>
+              </div>
+            </div>
+            <button class="btn btn-primary" style="background: #2563EB; font-weight: 700;" onclick="window.switchTab('mystock')">
+              📦 Stok & Eşikleri Düzenle &rarr;
+            </button>
+          </div>
+        </div>
+      `;
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 1.3 EXPORT REPORTS TO EXCEL / CSV
+  // -------------------------------------------------------------------------
+  window.exportOrdersToCSV = function() {
+    const orders = window.AppState.orders || [];
+    if (orders.length === 0) {
+      window.showToast('Dışa aktarılacak sipariş kaydı bulunamadı.', 'warning');
+      return;
+    }
+
+    const headers = ['Order Ref', 'Buyer Company', 'Supplier Company', 'Total Amount ($)', 'Status', 'Order Date', 'Expected Delivery', 'Delivered Date', 'Items & Qty'];
+    const rows = orders.map(o => {
+      const buyerName = o.buyer_company_details?.name || 'Buyer';
+      const supName = o.supplier_company_details?.name || 'Supplier';
+      const itemsSummary = (o.items || []).map(i => `${i.product_name} (${i.quantity_requested} ${i.unit || 'pcs'})`).join('; ');
+      return [
+        `"${o.order_number}"`,
+        `"${buyerName}"`,
+        `"${supName}"`,
+        `"${parseFloat(o.total_amount || 0).toFixed(2)}"`,
+        `"${o.status_display || o.status}"`,
+        `"${o.created_at ? o.created_at.slice(0, 10) : ''}"`,
+        `"${o.expected_delivery_date || ''}"`,
+        `"${o.actual_delivery_date || ''}"`,
+        `"${itemsSummary}"`
+      ].join(',');
+    });
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `B2B_Purchase_Orders_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.showToast('Siparişler başarıyla Excel/CSV formatında indirildi!', 'success');
+  };
+
+  window.exportInventoryToCSV = function() {
+    const inventory = window.AppState.inventory || [];
+    if (inventory.length === 0) {
+      window.showToast('Dışa aktarılacak envanter kaydı bulunamadı.', 'warning');
+      return;
+    }
+
+    const headers = ['SKU', 'Product Name', 'Category', 'Supplying Company', 'Current Stock', 'Unit', 'Unit Price ($)', 'Total Value ($)', 'Safety Threshold', 'Warehouse Location', 'Health Status'];
+    const rows = inventory.map(i => {
+      const prod = i.product || {};
+      const unitPrice = i.unit_price ? parseFloat(i.unit_price) : parseFloat(prod.unit_price || 0);
+      const totalVal = unitPrice * (i.current_stock || 0);
+      return [
+        `"${prod.sku || ''}"`,
+        `"${prod.name || ''}"`,
+        `"${prod.category_name || ''}"`,
+        `"${i.company_name || prod.preferred_supplier_name || ''}"`,
+        `"${i.current_stock || 0}"`,
+        `"${prod.unit || 'Pieces'}"`,
+        `"${unitPrice.toFixed(2)}"`,
+        `"${totalVal.toFixed(2)}"`,
+        `"${i.critical_threshold || 20}"`,
+        `"${i.warehouse_location || ''}"`,
+        `"${i.stock_health_status || 'HEALTHY'}"`
+      ].join(',');
+    });
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `B2B_Inventory_Report_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.showToast('Stok ve Envanter Raporu Excel/CSV formatında indirildi!', 'success');
+  };
+
+  // -------------------------------------------------------------------------
+  // 1.4 ORDER TRACKING & LOGISTICS STEPPER
+  // -------------------------------------------------------------------------
+  window.openOrderTrackingModal = function(orderId) {
+    const order = window.AppState.orders.find(o => parseInt(o.id) === parseInt(orderId));
+    if (!order) {
+      window.showToast('Sipariş bulunamadı.', 'danger');
+      return;
+    }
+
+    const modal = document.getElementById('orderTrackingModal');
+    if (!modal) return;
+
+    const stages = [
+      { key: 'PENDING_SUPPLIER', title: '1. PO Oluşturuldu', desc: 'Alıcı siparişi verdi, tedarikçi onayı bekleniyor.' },
+      { key: 'CONFIRMED', title: '2. Tedarikçi Onayladı', desc: 'Tedarikçi siparişi kabul etti, üretime/hazırlığa alındı.' },
+      { key: 'IN_TRANSIT', title: '3. Sevkiyatta & Kargoda', desc: 'Ürünler OSB Lojistik merkezine teslim edildi.' },
+      { key: 'DELIVERED', title: '4. Teslim Edildi', desc: 'Alıcı fabrikasına eksiksiz ulaştı.' },
+      { key: 'EVALUATED', title: '5. Fatura & Skorlama', desc: 'Fatura kesildi ve tedarikçi değerlendirildi.' }
+    ];
+
+    const currentIdx = stages.findIndex(s => s.key === order.status);
+    let activeIdx = 0;
+    if (order.is_evaluated) {
+      activeIdx = 4;
+    } else if (currentIdx >= 0) {
+      activeIdx = currentIdx;
+    } else if (order.status === 'DELIVERED') {
+      activeIdx = 3;
+    } else if (order.status === 'REJECTED' || order.status === 'REJECTED_BY_SUPPLIER' || order.status === 'REJECTED_BY_BUYER' || order.status === 'CANCELLED') {
+      activeIdx = -1;
+    }
+
+    const timelineContainer = document.getElementById('trackingTimelineContainer');
+    if (timelineContainer) {
+      timelineContainer.innerHTML = stages.map((s, idx) => {
+        const isDone = activeIdx >= 0 && idx <= activeIdx;
+        const isCurrent = activeIdx >= 0 && idx === activeIdx;
+        const color = isDone ? '#10B981' : 'rgba(148, 163, 184, 0.4)';
+        const bg = isDone ? 'rgba(16, 185, 129, 0.2)' : 'rgba(30, 41, 59, 0.5)';
+        const icon = isDone ? '✓' : (idx + 1);
+
+        return `
+          <div style="display: flex; gap: 14px; margin-bottom: 20px; position: relative;">
+            ${idx < stages.length - 1 ? `<div style="position: absolute; left: 15px; top: 32px; bottom: -16px; width: 2px; background: ${idx < activeIdx ? '#10B981' : 'rgba(51, 65, 85, 0.5)'};"></div>` : ''}
+            <div style="width: 32px; height: 32px; border-radius: 50%; background: ${bg}; border: 2px solid ${color}; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.85rem; color: ${isDone ? '#34D399' : '#94A3B8'}; z-index: 1;">
+              ${icon}
+            </div>
+            <div style="flex: 1;">
+              <h4 style="font-size: 0.95rem; font-weight: 700; color: ${isCurrent ? '#60A5FA' : (isDone ? '#F8FAFC' : '#64748B')}; margin-bottom: 2px;">
+                ${s.title} ${isCurrent ? '<span class="badge badge-info" style="font-size: 0.65rem; margin-left: 6px;">Active Status</span>' : ''}
+              </h4>
+              <p style="font-size: 0.78rem; color: var(--text-secondary);">${s.desc}</p>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    const elRef = document.getElementById('trackingOrderRef');
+    if (elRef) elRef.innerText = order.order_number;
+    const elAmount = document.getElementById('trackingOrderAmount');
+    if (elAmount) elAmount.innerText = `$${parseFloat(order.total_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    const elBuyer = document.getElementById('trackingBuyerName');
+    if (elBuyer) elBuyer.innerText = order.buyer_company_details?.name || 'Buyer';
+    const elSupplier = document.getElementById('trackingSupplierName');
+    if (elSupplier) elSupplier.innerText = order.supplier_company_details?.name || 'Supplier';
+
+    modal.classList.add('show');
+    modal.style.display = 'flex';
   };
 
   // -------------------------------------------------------------------------
@@ -987,6 +1402,9 @@
 
     tbody.innerHTML = orders.map(o => {
       let actionButtons = `
+        <button class="btn btn-secondary btn-sm" onclick="window.openOrderTrackingModal(${o.id})" title="Track Logistics & Delivery Status" style="background: rgba(16, 185, 129, 0.15); color: #34D399; border-color: rgba(16, 185, 129, 0.3);">
+          🚚 Track
+        </button>
         <a href="/api/orders/purchase-orders/${o.id}/pdf/" target="_blank" class="btn btn-secondary btn-sm" title="View Purchase Order PDF">
           📄 PO PDF
         </a>
@@ -1879,6 +2297,41 @@
           </div>
         </div>
 
+        <!-- 🤖 AI Demand Forecasting & Reorder Advisor Banner -->
+        <div id="aiInsightContainer"></div>
+
+        <!-- 📊 Interactive Supply Chain Analytics (Chart.js) -->
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 24px;">
+          <!-- Left: Monthly Trajectory Line Chart -->
+          <div class="card-section" style="margin-bottom: 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+              <div>
+                <h3 style="font-size: 1.05rem; font-weight: 700; color: #F8FAFC; display: flex; align-items: center; gap: 8px;">
+                  📈 <span id="spendTrendChartTitle">Monthly Procurement Spend Trajectory ($)</span>
+                </h3>
+                <p style="font-size: 0.76rem; color: var(--text-secondary); margin-top: 2px;">Aggregated purchasing & fulfillment trajectory across recent periods</p>
+              </div>
+              <span class="badge badge-info" style="font-size: 0.72rem;">Live Aggregation</span>
+            </div>
+            <div style="position: relative; height: 260px; width: 100%;">
+              <canvas id="spendTrendChart"></canvas>
+            </div>
+          </div>
+
+          <!-- Right: Category Spend Donut Chart -->
+          <div class="card-section" style="margin-bottom: 0;">
+            <div style="margin-bottom: 14px;">
+              <h3 style="font-size: 1.05rem; font-weight: 700; color: #F8FAFC; display: flex; align-items: center; gap: 8px;">
+                🍩 <span id="categorySpendChartTitle">Spend by Material Category</span>
+              </h3>
+              <p style="font-size: 0.76rem; color: var(--text-secondary); margin-top: 2px;">Portfolio distribution across active industrial domains</p>
+            </div>
+            <div style="position: relative; height: 260px; width: 100%; display: flex; align-items: center; justify-content: center;">
+              <canvas id="categorySpendChart"></canvas>
+            </div>
+          </div>
+        </div>
+
         <div class="card-section">
           <div class="section-header">
             <h2>
@@ -1916,9 +2369,14 @@
                 Configure your <b>Safety Thresholds (Emniyet Stoku / Kritik Eşik)</b> to trigger automated shortage alerts, and manage catalog pricing.
               </p>
             </div>
-            <button class="btn btn-primary" onclick="window.openModal('addProductModal')">
-              + Add New Catalog Material
-            </button>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" onclick="window.exportInventoryToCSV()">
+                📥 Export Stock Report (CSV)
+              </button>
+              <button class="btn btn-primary" onclick="window.openModal('addProductModal')">
+                + Add New Catalog Material
+              </button>
+            </div>
           </div>
 
           <div class="table-responsive">
@@ -1966,9 +2424,14 @@
                 Digitized document workflow with automated PDF invoice & quotation generation (`ReportLab` engine).
               </p>
             </div>
-            <button class="btn btn-primary" onclick="window.openModal('newOrderModal')">
-              + New Purchase Order
-            </button>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" onclick="window.exportOrdersToCSV()">
+                📥 Export Orders (CSV / Excel)
+              </button>
+              <button class="btn btn-primary" onclick="window.openModal('newOrderModal')">
+                + New Purchase Order
+              </button>
+            </div>
           </div>
 
           <div class="table-responsive">
@@ -2005,6 +2468,24 @@
           <div class="formula-display">
             <strong>Evaluation Model:</strong><br/>
             $$\text{Performance Score} = (0.40 \times \text{Timeliness}) + (0.35 \times \text{Order Completeness}) + (0.25 \times \text{Price Consistency})$$
+          </div>
+        </div>
+
+        <!-- Multi-Supplier Radar Matrix -->
+        <div class="card-section" style="margin-top: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <div>
+              <h3 style="font-size: 1.05rem; font-weight: 700; color: #F8FAFC; display: flex; align-items: center; gap: 8px;">
+                🎯 Multi-Supplier Performance Comparison (Radar Matrix)
+              </h3>
+              <p style="font-size: 0.76rem; color: var(--text-secondary); margin-top: 2px;">
+                Holistic benchmarking across Timeliness ($W_1$), Order Completeness ($W_2$), Price Consistency ($W_3$), Lead Time, and Quality.
+              </p>
+            </div>
+            <span class="badge badge-gold" style="font-size: 0.72rem;">Algorithm Visualization</span>
+          </div>
+          <div style="position: relative; height: 320px; width: 100%; display: flex; align-items: center; justify-content: center;">
+            <canvas id="supplierRadarChart"></canvas>
           </div>
         </div>
 
@@ -2209,6 +2690,50 @@
       <button type="button" class="btn btn-primary" style="background: #F59E0B; border-color: #D97706; color: black; font-weight: 700;" onclick="window.submitOrderEvaluation()">
         ✓ Submit Rating & Update Supplier Score
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- 4. Order Tracking & Logistics Stepper Modal -->
+<div id="orderTrackingModal" class="modal-backdrop">
+  <div class="modal-card" style="max-width: 580px;">
+    <div class="modal-header" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(30, 41, 59, 0.9));">
+      <div>
+        <h3 style="color: #6EE7B7; display: flex; align-items: center; gap: 8px;">
+          🚚 B2B Logistics & Order Tracking Timeline
+        </h3>
+        <p style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 2px;">
+          Real-time milestone tracking across warehouse dispatch & delivery stages
+        </p>
+      </div>
+      <button class="close-btn" onclick="window.closeModal('orderTrackingModal')">&times;</button>
+    </div>
+    <div class="modal-body" style="padding: 24px;">
+      <!-- Order Summary Card -->
+      <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 14px 18px; margin-bottom: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div>
+          <span style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; display: block;">Order Reference</span>
+          <strong id="trackingOrderRef" style="color: #60A5FA; font-size: 1rem; font-family: monospace;">PO-2026-XXXX</strong>
+        </div>
+        <div>
+          <span style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; display: block;">Total Amount</span>
+          <strong id="trackingOrderAmount" style="color: #34D399; font-size: 1.05rem;">$0.00</strong>
+        </div>
+        <div>
+          <span style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; display: block;">Purchasing Buyer</span>
+          <span id="trackingBuyerName" style="color: #F8FAFC; font-size: 0.85rem; font-weight: 600;">Apex Precision Ltd.</span>
+        </div>
+        <div>
+          <span style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; display: block;">Supplying Vendor</span>
+          <span id="trackingSupplierName" style="color: #F8FAFC; font-size: 0.85rem; font-weight: 600;">Atlas Industrial</span>
+        </div>
+      </div>
+
+      <!-- Vertical Stepper Container -->
+      <div id="trackingTimelineContainer" style="padding: 6px 12px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="window.closeModal('orderTrackingModal')">Close Tracking</button>
     </div>
   </div>
 </div>
