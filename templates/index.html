@@ -433,9 +433,17 @@
         const comp = window.AppState.currentUser.company;
         const compId = parseInt(comp.id);
         if (comp.company_type === 'SUPPLIER') {
-          orders = orders.filter(o => parseInt(o.supplier_company) === compId || (o.supplier_company_details && parseInt(o.supplier_company_details.id) === compId));
+          orders = orders.filter(o => {
+            const supId = parseInt(o.supplier_company?.id || o.supplier_company);
+            const supDetailId = o.supplier_company_details ? parseInt(o.supplier_company_details.id) : null;
+            return supId === compId || supDetailId === compId;
+          });
         } else {
-          orders = orders.filter(o => parseInt(o.buyer_company) === compId || (o.buyer_company_details && parseInt(o.buyer_company_details.id) === compId));
+          orders = orders.filter(o => {
+            const buyerId = parseInt(o.buyer_company?.id || o.buyer_company);
+            const buyerDetailId = o.buyer_company_details ? parseInt(o.buyer_company_details.id) : null;
+            return buyerId === compId || buyerDetailId === compId;
+          });
         }
       }
       window.AppState.orders = orders;
@@ -2048,8 +2056,12 @@
 
     if (!prod) return;
 
-    let supplierId = targetSupplierId || prod.preferred_supplier;
-    if (!supplierId && window.AppState.suppliers.length > 0) {
+    let supplierId = targetSupplierId;
+    if (!supplierId && prod) {
+      const invMatch = window.AppState.inventory.find(i => parseInt(i.product?.id || i.product) === parseInt(selectedProdId));
+      supplierId = invMatch ? (invMatch.company?.id || invMatch.company) : (prod.preferred_supplier?.id || prod.preferred_supplier);
+    }
+    if (!supplierId && window.AppState.suppliers && window.AppState.suppliers.length > 0) {
       supplierId = window.AppState.suppliers[0].id;
     }
 
@@ -2710,7 +2722,7 @@
           </div>
         </div>
 
-        <input type="hidden" id="orderHiddenSupplierId" value="14">
+        <input type="hidden" id="orderHiddenSupplierId" value="">
 
         <div class="form-group">
           <label class="form-label">Material to Buy</label>
@@ -2930,12 +2942,21 @@ document.addEventListener('DOMContentLoaded', () => {
       
       let supplierId = parseInt(document.getElementById('orderHiddenSupplierId')?.value);
       if (!supplierId && prod) {
-        supplierId = prod.preferred_supplier;
+        const invMatch = window.AppState.inventory.find(i => parseInt(i.product?.id || i.product) === parseInt(prodId));
+        supplierId = invMatch ? (invMatch.company?.id || invMatch.company) : (prod.preferred_supplier?.id || prod.preferred_supplier);
       }
-      if (!supplierId) supplierId = 14;
+      if (!supplierId && window.AppState.suppliers && window.AppState.suppliers.length > 0) {
+        supplierId = window.AppState.suppliers[0].id;
+      }
 
       const qty = parseInt(document.getElementById('orderQuantity')?.value || 1);
-      const buyerCompId = window.AppState.currentUser?.company?.id || 13;
+      
+      // Dynamic Buyer Company ID
+      let buyerCompId = window.AppState.currentUser?.company?.id;
+      if (!buyerCompId) {
+        const smeComp = window.AppState.companies?.find(c => c.company_type === 'SME' || c.company_type === 'BUYER');
+        buyerCompId = smeComp ? smeComp.id : 29;
+      }
       const supplierObj = window.AppState.suppliers.find(s => s.id === supplierId);
       const supplierName = supplierObj ? supplierObj.name : (prod ? prod.preferred_supplier_name : 'Supplier');
 
