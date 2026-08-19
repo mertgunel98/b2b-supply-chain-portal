@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/portal.css?v=20260818a">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <!-- SCRIPT IN HEAD: ALL FUNCTIONS DEFINED GLOBALLY BEFORE DOM PARSE -->
   <script>
@@ -1004,83 +1005,131 @@
   };
 
   // -------------------------------------------------------------------------
-  // 1.3 EXPORT REPORTS TO EXCEL / CSV
+  // 1.3 EXPORT REPORTS TO EXCEL (.XLSX)
   // -------------------------------------------------------------------------
-  window.exportOrdersToCSV = function() {
+  window.exportOrdersToExcel = function() {
     const orders = window.AppState.orders || [];
     if (orders.length === 0) {
       window.showToast('Dışa aktarılacak sipariş kaydı bulunamadı.', 'warning');
       return;
     }
 
-    const headers = ['Order Ref', 'Buyer Company', 'Supplier Company', 'Total Amount ($)', 'Status', 'Order Date', 'Expected Delivery', 'Delivered Date', 'Items & Qty'];
-    const rows = orders.map(o => {
-      const buyerName = o.buyer_company_details?.name || 'Buyer';
-      const supName = o.supplier_company_details?.name || 'Supplier';
-      const itemsSummary = (o.items || []).map(i => `${i.product_name} (${i.quantity_requested} ${i.unit || 'pcs'})`).join('; ');
-      return [
-        `"${o.order_number}"`,
-        `"${buyerName}"`,
-        `"${supName}"`,
-        `"${parseFloat(o.total_amount || 0).toFixed(2)}"`,
-        `"${o.status_display || o.status}"`,
-        `"${o.created_at ? o.created_at.slice(0, 10) : ''}"`,
-        `"${o.expected_delivery_date || ''}"`,
-        `"${o.actual_delivery_date || ''}"`,
-        `"${itemsSummary}"`
-      ].join(',');
+    const excelData = orders.map((o, idx) => {
+      const buyerName = o.buyer_company_details?.name || 'Buyer Company';
+      const supName = o.supplier_company_details?.name || 'Supplier Company';
+      const itemsSummary = (o.items || []).map(i => `${i.product_name || (i.product?.name)} (${i.quantity_requested} ${i.unit || 'adet'})`).join('; ');
+      const totalSpend = parseFloat(o.total_amount || 0);
+
+      let evalSummary = 'Değerlendirilmedi';
+      if (o.is_evaluated) {
+        const composite = ((parseFloat(o.timeliness_score || 100) * 0.40) + (parseFloat(o.completeness_score || 100) * 0.35) + (parseFloat(o.price_consistency_score || 100) * 0.25)).toFixed(1);
+        evalSummary = `${composite}% (W1: ${o.timeliness_score}%, W2: ${o.completeness_score}%, W3: ${o.price_consistency_score}%)`;
+      }
+
+      return {
+        'No': idx + 1,
+        'Sipariş No (PO Ref)': o.order_number,
+        'Alıcı Firma (Buyer)': buyerName,
+        'Tedarikçi Firma (Vendor)': supName,
+        'Toplam Tutar ($)': totalSpend,
+        'Sipariş Durumu': o.status_display || o.status,
+        'Sipariş Tarihi': o.created_at ? o.created_at.slice(0, 10) : '',
+        'Beklenen Teslimat': o.expected_delivery_date || '',
+        'Gerçek Teslimat': o.actual_delivery_date || '',
+        'Sipariş Kalemleri & Miktar': itemsSummary,
+        'Performans Skoru': evalSummary,
+        'Alıcı Notu / Geri Bildirim': o.evaluation_feedback || o.notes || ''
+      };
     });
 
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `B2B_Purchase_Orders_${new Date().toISOString().slice(0,10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.showToast('Siparişler başarıyla Excel/CSV formatında indirildi!', 'success');
+    if (typeof XLSX !== 'undefined') {
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      ws['!cols'] = [
+        { wch: 6 },
+        { wch: 18 },
+        { wch: 30 },
+        { wch: 30 },
+        { wch: 18 },
+        { wch: 22 },
+        { wch: 15 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 38 },
+        { wch: 25 },
+        { wch: 30 }
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Siparisler");
+      XLSX.writeFile(wb, `B2B_Siparis_Raporu_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      window.showToast('Siparişler başarıyla Excel (.xlsx) formatında indirildi!', 'success');
+    } else {
+      window.showToast('Excel motoru hazırlanıyor, lütfen tekrar deneyin.', 'warning');
+    }
   };
+  window.exportOrdersToCSV = window.exportOrdersToExcel;
 
-  window.exportInventoryToCSV = function() {
+  window.exportInventoryToExcel = function() {
     const inventory = window.AppState.inventory || [];
     if (inventory.length === 0) {
       window.showToast('Dışa aktarılacak envanter kaydı bulunamadı.', 'warning');
       return;
     }
 
-    const headers = ['SKU', 'Product Name', 'Category', 'Supplying Company', 'Current Stock', 'Unit', 'Unit Price ($)', 'Total Value ($)', 'Safety Threshold', 'Warehouse Location', 'Health Status'];
-    const rows = inventory.map(i => {
+    const excelData = inventory.map((i, idx) => {
       const prod = i.product || {};
       const unitPrice = i.unit_price ? parseFloat(i.unit_price) : parseFloat(prod.unit_price || 0);
-      const totalVal = unitPrice * (i.current_stock || 0);
-      return [
-        `"${prod.sku || ''}"`,
-        `"${prod.name || ''}"`,
-        `"${prod.category_name || ''}"`,
-        `"${i.company_name || prod.preferred_supplier_name || ''}"`,
-        `"${i.current_stock || 0}"`,
-        `"${prod.unit || 'Pieces'}"`,
-        `"${unitPrice.toFixed(2)}"`,
-        `"${totalVal.toFixed(2)}"`,
-        `"${i.critical_threshold || 20}"`,
-        `"${i.warehouse_location || ''}"`,
-        `"${i.stock_health_status || 'HEALTHY'}"`
-      ].join(',');
+      const stock = i.current_stock || 0;
+      const totalVal = unitPrice * stock;
+      const threshold = i.critical_threshold || 20;
+
+      let status = 'Stok Yeterli (Normal)';
+      if (stock <= 0) {
+        status = 'TÜKENDİ (Out of Stock)';
+      } else if (stock <= threshold) {
+        status = 'KRİTİK EŞİK ALTI (Kritik)';
+      }
+
+      return {
+        'No': idx + 1,
+        'SKU Kodu': prod.sku || '',
+        'Malzeme Adı': prod.name || '',
+        'Kategori': prod.category_name || '',
+        'Tedarikçi Şirket': i.company_name || prod.preferred_supplier_name || '',
+        'Mevcut Stok': stock,
+        'Birim': prod.unit || 'Pieces',
+        'Birim Fiyat ($)': unitPrice,
+        'Toplam Değer ($)': totalVal,
+        'Emniyet Eşiği (Threshold)': threshold,
+        'Stok Sağlık Durumu': status,
+        'Depo / Tesis Lokasyonu': i.warehouse_location || 'Ana Depo'
+      };
     });
 
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `B2B_Inventory_Report_${new Date().toISOString().slice(0,10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.showToast('Stok ve Envanter Raporu Excel/CSV formatında indirildi!', 'success');
+    if (typeof XLSX !== 'undefined') {
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      ws['!cols'] = [
+        { wch: 6 },
+        { wch: 18 },
+        { wch: 34 },
+        { wch: 25 },
+        { wch: 30 },
+        { wch: 14 },
+        { wch: 12 },
+        { wch: 16 },
+        { wch: 18 },
+        { wch: 22 },
+        { wch: 24 },
+        { wch: 25 }
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Stok_Envanter");
+      XLSX.writeFile(wb, `B2B_Stok_Envanter_Raporu_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      window.showToast('Stok ve Envanter Raporu Excel (.xlsx) formatında indirildi!', 'success');
+    } else {
+      window.showToast('Excel motoru hazırlanıyor, lütfen tekrar deneyin.', 'warning');
+    }
   };
+  window.exportInventoryToCSV = window.exportInventoryToExcel;
 
   // -------------------------------------------------------------------------
   // 1.4 ORDER TRACKING & LOGISTICS STEPPER
@@ -2519,8 +2568,8 @@
               </p>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-              <button class="btn btn-secondary" onclick="window.exportInventoryToCSV()">
-                📥 Export Stock Report (CSV)
+              <button class="btn btn-secondary" onclick="window.exportInventoryToExcel()" style="background: rgba(16, 185, 129, 0.15); color: #34D399; border-color: rgba(16, 185, 129, 0.35); font-weight: 700;">
+                📊 Export Stock (Excel .xlsx)
               </button>
               <button class="btn btn-primary" onclick="window.openModal('addProductModal')">
                 + Add New Catalog Material
@@ -2574,8 +2623,8 @@
               </p>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-              <button class="btn btn-secondary" onclick="window.exportOrdersToCSV()">
-                📥 Export Orders (CSV / Excel)
+              <button class="btn btn-secondary" onclick="window.exportOrdersToExcel()" style="background: rgba(16, 185, 129, 0.15); color: #34D399; border-color: rgba(16, 185, 129, 0.35); font-weight: 700;">
+                📊 Export Orders (Excel .xlsx)
               </button>
               <button class="btn btn-primary" onclick="window.openModal('newOrderModal')">
                 + New Purchase Order
