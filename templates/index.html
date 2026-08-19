@@ -275,6 +275,9 @@
     const btnPo = document.getElementById('btnCreatePoTopbar');
     if (btnPo) btnPo.style.display = isSme ? 'inline-flex' : 'none';
 
+    const btnOrdersTabPo = document.getElementById('btnNewOrderOrdersTab');
+    if (btnOrdersTabPo) btnOrdersTabPo.style.display = isSme ? 'inline-flex' : 'none';
+
     const elSideUser = document.getElementById('sidebarUsername');
     if (elSideUser) elSideUser.innerText = user.username;
 
@@ -1572,6 +1575,11 @@
         : '📑 My Purchase Orders & Automated Invoicing Hub';
     }
 
+    const btnOrdersTabPo = document.getElementById('btnNewOrderOrdersTab');
+    if (btnOrdersTabPo) {
+      btnOrdersTabPo.style.display = isSupplier ? 'none' : 'inline-flex';
+    }
+
     if (orders.length === 0) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">No purchase orders found for this account.</td></tr>`;
       return;
@@ -2626,7 +2634,7 @@
               <button class="btn btn-secondary" onclick="window.exportOrdersToExcel()" style="background: rgba(16, 185, 129, 0.15); color: #34D399; border-color: rgba(16, 185, 129, 0.35); font-weight: 700;">
                 📊 Export Orders (Excel .xlsx)
               </button>
-              <button class="btn btn-primary" onclick="window.openModal('newOrderModal')">
+              <button class="btn btn-primary" id="btnNewOrderOrdersTab" onclick="window.openModal('newOrderModal')">
                 + New Purchase Order
               </button>
             </div>
