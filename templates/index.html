@@ -1054,6 +1054,91 @@
   };
 
   // -------------------------------------------------------------------------
+  // 1.5 SUPPLIER TRUST & RELIABILITY HELPER
+  // -------------------------------------------------------------------------
+  window.getSupplierTrustInfo = function(supplierId) {
+    if (!supplierId) {
+      return {
+        hasScore: false,
+        badgeText: '🆕 Yeni Tedarikçi',
+        badgeClass: 'badge-info',
+        badgeColor: '#60A5FA',
+        pillHtml: '<span class="badge badge-info" style="font-size: 0.7rem; padding: 2px 7px;">🆕 Yeni Tedarikçi</span>',
+        overallScore: null,
+        count: 0,
+        w1: '--',
+        w2: '--',
+        w3: '--',
+        tier: 'Yeni Tedarikçi'
+      };
+    }
+
+    const supId = parseInt(supplierId);
+    const evaluatedOrders = (window.AppState.orders || []).filter(o => {
+      const sId = parseInt(o.supplier_company?.id || o.supplier_company);
+      return sId === supId && o.is_evaluated;
+    });
+
+    if (evaluatedOrders.length === 0) {
+      return {
+        hasScore: false,
+        badgeText: '🆕 Yeni Tedarikçi (Henüz Yorum Yok)',
+        badgeClass: 'badge-info',
+        badgeColor: '#60A5FA',
+        pillHtml: '<span class="badge badge-info" style="font-size: 0.7rem; padding: 2px 7px;">🆕 Yeni Tedarikçi</span>',
+        overallScore: null,
+        count: 0,
+        w1: '--',
+        w2: '--',
+        w3: '--',
+        tier: 'Yeni Tedarikçi'
+      };
+    }
+
+    const count = evaluatedOrders.length;
+    const avgW1 = evaluatedOrders.reduce((sum, o) => sum + parseFloat(o.timeliness_score || 100), 0) / count;
+    const avgW2 = evaluatedOrders.reduce((sum, o) => sum + parseFloat(o.completeness_score || 100), 0) / count;
+    const avgW3 = evaluatedOrders.reduce((sum, o) => sum + parseFloat(o.price_consistency_score || 100), 0) / count;
+    const composite = (avgW1 * 0.40) + (avgW2 * 0.35) + (avgW3 * 0.25);
+
+    let tier = 'Tier 2 - Reliable';
+    let badgeClass = 'badge-silver';
+    let badgeColor = '#94A3B8';
+    let star = '⭐';
+
+    if (composite >= 90) {
+      tier = 'Tier 1 - Preferred';
+      badgeClass = 'badge-gold';
+      badgeColor = '#FBBF24';
+      star = '⭐';
+    } else if (composite >= 75) {
+      tier = 'Tier 2 - Reliable';
+      badgeClass = 'badge-silver';
+      badgeColor = '#94A3B8';
+      star = '🥈';
+    } else {
+      tier = 'Tier 3 - Needs Improvement';
+      badgeClass = 'badge-critical';
+      badgeColor = '#F87171';
+      star = '⚠️';
+    }
+
+    return {
+      hasScore: true,
+      badgeText: `${star} ${composite.toFixed(1)}% (${tier})`,
+      badgeClass: badgeClass,
+      badgeColor: badgeColor,
+      pillHtml: `<span class="badge ${badgeClass}" style="font-size: 0.72rem; padding: 2px 8px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">${star} ${composite.toFixed(1)}% Güvenilirlik (${count} sipariş)</span>`,
+      overallScore: composite.toFixed(1),
+      count: count,
+      w1: avgW1.toFixed(0) + '%',
+      w2: avgW2.toFixed(0) + '%',
+      w3: avgW3.toFixed(0) + '%',
+      tier: tier
+    };
+  };
+
+  // -------------------------------------------------------------------------
   // 2. B2B MARKETPLACE (ALL COMPANIES MATERIALS & DIRECT PURCHASING)
   // -------------------------------------------------------------------------
   window.renderMarketplace = function() {
@@ -1121,6 +1206,7 @@
       const prodUnit = item.product?.unit || 'Pieces';
       const prodName = item.product?.name || 'Industrial Material';
       const prodSku = item.product?.sku || 'SKU-000';
+      const trustInfo = window.getSupplierTrustInfo(supplierId);
 
       return `
         <div class="card-section" style="display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); border-radius: 14px; background: rgba(30, 41, 59, 0.6); transition: all 0.2s ease; padding: 20px; position: relative;">
@@ -1138,8 +1224,9 @@
             </span>
 
             <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px;">
-              <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px;">
-                Supplied By Verified Vendor
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Tedarikçi Firma</span>
+                ${trustInfo.pillHtml}
               </div>
               <strong style="color: #60A5FA; font-size: 0.88rem; display: flex; align-items: center; gap: 4px;">
                 🏭 ${supplierName}
@@ -2109,6 +2196,27 @@
       elVendorName.innerText = `🏭 ${supplierObj.name}`;
     }
 
+    // Update Vendor Reliability & Trust Score
+    const trustInfo = window.getSupplierTrustInfo(supplierId);
+    const elTrustBadge = document.getElementById('orderModalTrustBadge');
+    if (elTrustBadge) {
+      if (trustInfo.hasScore) {
+        elTrustBadge.innerText = `${trustInfo.badgeText}`;
+        elTrustBadge.className = `badge ${trustInfo.badgeClass}`;
+        elTrustBadge.style.color = trustInfo.badgeColor;
+      } else {
+        elTrustBadge.innerText = '🆕 Yeni Tedarikçi';
+        elTrustBadge.className = 'badge badge-info';
+        elTrustBadge.style.color = '#60A5FA';
+      }
+    }
+    const elTrustW1 = document.getElementById('orderModalTrustW1');
+    if (elTrustW1) elTrustW1.innerText = trustInfo.w1;
+    const elTrustW2 = document.getElementById('orderModalTrustW2');
+    if (elTrustW2) elTrustW2.innerText = trustInfo.w2;
+    const elTrustW3 = document.getElementById('orderModalTrustW3');
+    if (elTrustW3) elTrustW3.innerText = trustInfo.w3;
+
     // Find available stock for THIS specific supplier
     const invItem = window.AppState.inventory.find(i => (parseInt(i.product.id || i.product) === parseInt(selectedProdId)) && (parseInt(i.company?.id || i.company) === parseInt(supplierId))) ||
                     window.AppState.inventory.find(i => parseInt(i.product.id || i.product) === parseInt(selectedProdId));
@@ -2676,61 +2784,73 @@
 
 <!-- 2. Create Purchase Order Modal -->
 <div id="newOrderModal" class="modal-backdrop">
-  <div class="modal-card" style="max-width: 560px;">
-    <div class="modal-header" style="background: linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(30, 41, 59, 0.9));">
+  <div class="modal-card" style="max-width: 540px; max-height: 90vh; display: flex; flex-direction: column;">
+    <div class="modal-header" style="background: linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(30, 41, 59, 0.9)); padding: 14px 20px; flex-shrink: 0;">
       <div>
-        <h3 style="color: #93C5FD;">🛒 Issue Purchase Order / Malzeme Satın Al</h3>
-        <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">Direct purchase from supplying vendor with automated notification & PO PDF</p>
+        <h3 style="color: #93C5FD; font-size: 1.05rem; margin: 0;">🛒 Issue Purchase Order / Malzeme Satın Al</h3>
+        <p style="font-size: 0.75rem; color: var(--text-secondary); margin: 2px 0 0 0;">Doğrudan tedarikçiye onaylı sipariş gönderimi ve otomatik PDF fatura</p>
       </div>
       <button class="close-btn" onclick="window.closeModal('newOrderModal')">&times;</button>
     </div>
-    <form id="newOrderForm">
-      <div class="modal-body" style="padding: 24px;">
-        <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 14px 18px; margin-bottom: 20px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Receiving Supplier</span>
-            <strong id="orderModalVendorBadge" style="color: #60A5FA; font-size: 0.95rem;">🏭 Atlas Industrial Components A.S.</strong>
+    <form id="newOrderForm" style="display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0; overflow: hidden;">
+      <div class="modal-body" style="padding: 16px 20px; overflow-y: auto; flex: 1; min-height: 0;">
+        <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Hedef Tedarikçi</span>
+            <strong id="orderModalVendorBadge" style="color: #60A5FA; font-size: 0.9rem;">🏭 Atlas Industrial Components A.S.</strong>
           </div>
-          <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed var(--border-subtle); padding-top: 8px;">
-            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Agreed Unit Price</span>
-            <strong id="orderModalUnitPrice" style="color: #34D399; font-size: 1.05rem;">$18.75 / Sets</strong>
+          
+          <!-- Vendor Reliability & Trust Scorecard -->
+          <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed var(--border-subtle); padding-top: 6px;">
+            <span style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">🛡️ Güvenilirlik Puanı</span>
+            <span id="orderModalTrustBadge" class="badge badge-gold" style="font-size: 0.72rem; font-weight: 700;">⭐ 94.5% (Tier 1 - Preferred)</span>
           </div>
-          <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed var(--border-subtle); padding-top: 8px; margin-top: 8px;">
-            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">📦 Available Supplier Stock</span>
-            <strong id="orderModalAvailableStockVal" style="color: #60A5FA; font-size: 0.95rem;">50 Units</strong>
+          <div id="orderModalTrustBreakdown" style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; font-size: 0.68rem; color: #94A3B8;">
+            <span>⏱️ Zamanlama: <strong id="orderModalTrustW1" style="color: #60A5FA;">--</strong></span>
+            <span>📦 Eksiksizlik: <strong id="orderModalTrustW2" style="color: #34D399;">--</strong></span>
+            <span>💲 Fiyat: <strong id="orderModalTrustW3" style="color: #FBBF24;">--</strong></span>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed var(--border-subtle); padding-top: 6px; margin-top: 6px;">
+            <span style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Birim Fiyat</span>
+            <strong id="orderModalUnitPrice" style="color: #34D399; font-size: 0.95rem;">$18.75 / Sets</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed var(--border-subtle); padding-top: 6px; margin-top: 6px;">
+            <span style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">📦 Tedarikçi Mevcut Stoğu</span>
+            <strong id="orderModalAvailableStockVal" style="color: #60A5FA; font-size: 0.9rem;">50 Units</strong>
           </div>
         </div>
 
         <input type="hidden" id="orderHiddenSupplierId" value="">
 
-        <div class="form-group">
-          <label class="form-label">Material to Buy</label>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label" style="margin-bottom: 4px; font-size: 0.78rem;">Satın Alınacak Malzeme</label>
           <select id="orderProductSelect" class="form-control" required onchange="window.refreshOrderModalDetails()"></select>
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
-          <div class="form-group">
-            <label class="form-label">Order Quantity</label>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" style="margin-bottom: 4px; font-size: 0.78rem;">Sipariş Adedi</label>
             <input type="number" id="orderQuantity" class="form-control" value="50" min="1" required oninput="window.refreshOrderModalDetails()">
-            <div id="orderStockWarning" style="display: none; color: #F87171; font-size: 0.75rem; font-weight: 600; margin-top: 5px;"></div>
+            <div id="orderStockWarning" style="display: none; color: #F87171; font-size: 0.72rem; font-weight: 600; margin-top: 4px;"></div>
           </div>
-          <div class="form-group">
-            <label class="form-label">Total Calculated Spend</label>
-            <div id="orderModalTotalAmount" style="padding: 10px 14px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; font-weight: 800; color: #34D399; font-size: 1.15rem; text-align: right;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" style="margin-bottom: 4px; font-size: 0.78rem;">Toplam Tutar</label>
+            <div id="orderModalTotalAmount" style="padding: 8px 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; font-weight: 800; color: #34D399; font-size: 1.1rem; text-align: right;">
               $937.50
             </div>
           </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Delivery Notes / Destination Address</label>
-          <textarea id="orderNotes" class="form-control" rows="2" placeholder="e.g. Deliver to Nilüfer OSB Plant 2, Loading Bay 4 within 3 business days."></textarea>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label class="form-label" style="margin-bottom: 4px; font-size: 0.78rem;">Teslimat Notu & Fabrika Adresi (Opsiyonel)</label>
+          <textarea id="orderNotes" class="form-control" rows="2" placeholder="Örn: Nilüfer OSB 2. Fabrika, 4 No'lu Sevkiyat Kapısına mesai saatlerinde teslim edilsin."></textarea>
         </div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" onclick="window.closeModal('newOrderModal')">Cancel</button>
-        <button type="submit" class="btn btn-primary" id="btnSubmitNewOrder" style="background: #2563EB; font-weight: 700; padding: 10px 20px;">
-          🚀 Send Order to Supplier / Siparişi Gönder
+      <div class="modal-footer" style="padding: 12px 20px; flex-shrink: 0; background: rgba(15, 23, 42, 0.85); border-top: 1px solid var(--border-subtle);">
+        <button type="button" class="btn btn-secondary" onclick="window.closeModal('newOrderModal')">İptal</button>
+        <button type="submit" class="btn btn-primary" id="btnSubmitNewOrder" style="background: #2563EB; font-weight: 700; padding: 9px 18px;">
+          🚀 Siparişi Gönder (PO Oluştur)
         </button>
       </div>
     </form>
