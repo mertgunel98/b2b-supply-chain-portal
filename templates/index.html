@@ -1739,103 +1739,149 @@
     const container = document.getElementById('supplierLeaderboardContainer');
     if (!container) return;
 
-    const myCompanyId = window.AppState.currentUser?.company?.id;
-    let items = window.AppState.supplierLeaderboard;
+    const myCompany = window.AppState.currentUser?.company;
+    const myCompanyId = myCompany ? parseInt(myCompany.id) : null;
+    const supplierName = myCompany ? myCompany.name : 'Supplier Company';
 
-    const myScorecard = items.find(s => parseInt(s.supplier_id) === parseInt(myCompanyId)) || items[0];
+    // Find ONLY the evaluated orders belonging to THIS supplier
+    const evaluatedOrders = (window.AppState.orders || []).filter(o => {
+      const isMine = myCompanyId ? (parseInt(o.supplier_company?.id || o.supplier_company) === myCompanyId) : true;
+      return isMine && o.is_evaluated;
+    });
 
-    let html = '';
-    if (myScorecard) {
-      const evaluatedOrders = window.AppState.orders.filter(o => o.is_evaluated);
-
-      html += `
-        <div class="card-section" style="border: 2px solid #3B82F6; background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95)); margin-bottom: 28px;">
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
-            <div>
-              <span class="badge badge-info" style="margin-bottom: 8px;">🎯 Your Official Supplier Scorecard</span>
-              <h2 style="font-size: 1.5rem; font-weight: 800;">${myScorecard.supplier_name}</h2>
-              <p style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 4px;">
-                Calculated dynamically from real buyer order evaluations ($W_1, W_2, W_3$).
-              </p>
-            </div>
-            <div style="text-align: right;">
-              <div style="font-size: 2.8rem; font-weight: 900; color: #60A5FA; letter-spacing: -0.04em;">
-                ${myScorecard.overall_score.toFixed(1)}%
-              </div>
-              <span class="badge badge-gold" style="font-size: 0.85rem; padding: 6px 14px;">${myScorecard.tier}</span>
-            </div>
+    if (evaluatedOrders.length === 0) {
+      // NEW SUPPLIER - NO EVALUATIONS YET
+      container.innerHTML = `
+        <div class="card-section" style="border: 1px dashed rgba(59, 130, 246, 0.4); background: rgba(30, 41, 59, 0.6); padding: 40px 24px; text-align: center; margin-top: 10px;">
+          <div style="font-size: 3rem; margin-bottom: 12px;">📊</div>
+          <h2 style="font-size: 1.35rem; font-weight: 800; color: #F8FAFC; margin-bottom: 6px;">
+            ${supplierName}
+          </h2>
+          <div style="display: inline-block; margin-bottom: 16px;">
+            <span class="badge badge-info" style="font-size: 0.85rem; padding: 6px 14px;">
+              🆕 Yeni Tedarikçi / Henüz Alıcı Değerlendirmesi Bulunmuyor
+            </span>
           </div>
-
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 20px;">
-            <div style="background: var(--bg-card); padding: 16px; border-radius: 10px; border: 1px solid var(--border-subtle);">
-              <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 6px;">
-                <span style="color: var(--text-secondary);">Delivery Timeliness ($W_1$ - 40%)</span>
-                <strong style="color: #60A5FA;">${myScorecard.timeliness_score.toFixed(1)}%</strong>
-              </div>
-              <div class="progress-container">
-                <div class="progress-fill" style="width: ${myScorecard.timeliness_score}%; background-color: #3B82F6;"></div>
-              </div>
-              <span style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; display: block;">Evaluated on-time performance</span>
-            </div>
-
-            <div style="background: var(--bg-card); padding: 16px; border-radius: 10px; border: 1px solid var(--border-subtle);">
-              <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 6px;">
-                <span style="color: var(--text-secondary);">Order Completeness ($W_2$ - 35%)</span>
-                <strong style="color: #34D399;">${myScorecard.completeness_score.toFixed(1)}%</strong>
-              </div>
-              <div class="progress-container">
-                <div class="progress-fill" style="width: ${myScorecard.completeness_score}%; background-color: #10B981;"></div>
-              </div>
-              <span style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; display: block;">Fulfilled item volume accuracy</span>
-            </div>
-
-            <div style="background: var(--bg-card); padding: 16px; border-radius: 10px; border: 1px solid var(--border-subtle);">
-              <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 6px;">
-                <span style="color: var(--text-secondary);">Price Consistency ($W_3$ - 25%)</span>
-                <strong style="color: #FBBF24;">${myScorecard.price_consistency_score.toFixed(1)}%</strong>
-              </div>
-              <div class="progress-container">
-                <div class="progress-fill" style="width: ${myScorecard.price_consistency_score}%; background-color: #F59E0B;"></div>
-              </div>
-              <span style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; display: block;">Catalog price adherence</span>
-            </div>
+          <p style="font-size: 0.88rem; color: #94A3B8; max-width: 580px; margin: 0 auto 20px auto; line-height: 1.6;">
+            Şirketiniz yeni açıldığı için henüz alıcılardan tamamlanmış ve puanlanmış bir sipariş değerlendirmesi bulunmamaktadır. 
+            Alıcılar teslim aldıkları siparişleri teslimat zamanlaması ($W_1$), eksiksizlik ($W_2$) ve fiyat tutarlılığı ($W_3$) kriterlerine göre puanladıkça ortalama skorunuz ve tedarikçi kademeniz dinamik olarak hesaplanacaktır.
+          </p>
+          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 16px; max-width: 480px; margin: 0 auto; text-align: left;">
+            <div style="font-size: 0.75rem; color: #60A5FA; font-weight: 700; text-transform: uppercase; margin-bottom: 6px;">💡 Nasıl Puan Kazanılır?</div>
+            <ul style="font-size: 0.8rem; color: #CBD5E1; margin: 0; padding-left: 18px; line-height: 1.5;">
+              <li>Kataloğunuza malzeme ekleyin ve gelen siparişleri zamanında teslim edin.</li>
+              <li>Alıcılar sipariş tesliminde 3 temel kritere göre 0-100% arası puanlama yapar.</li>
+              <li>Tüm alıcı puanlarınızın ağırlıklı ortalaması genel skorunuzu belirler.</li>
+            </ul>
           </div>
         </div>
       `;
-
-      // Evaluation History Section
-      if (evaluatedOrders.length > 0) {
-        html += `
-          <div class="card-section" style="margin-top: 20px;">
-            <div class="section-header">
-              <h2>💬 Recent Buyer Evaluation Reviews & Ratings</h2>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 14px;">
-              ${evaluatedOrders.map(eo => {
-                const comp = ((eo.timeliness_score * 0.40) + (eo.completeness_score * 0.35) + (eo.price_consistency_score * 0.25)).toFixed(1);
-                return `
-                  <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 16px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                      <div>
-                        <strong style="color: #60A5FA; font-size: 0.95rem;">${eo.order_number}</strong>
-                        <span style="color: var(--text-muted); font-size: 0.8rem; margin-left: 8px;">(Buyer: ${eo.buyer_company_details ? eo.buyer_company_details.name : 'SME'})</span>
-                      </div>
-                      <span class="badge badge-gold" style="font-size: 0.85rem;">⭐ Score: ${comp}%</span>
-                    </div>
-                    <div style="display: flex; gap: 14px; font-size: 0.78rem; color: #94A3B8; margin-top: 6px;">
-                      <span>⏱️ Timeliness ($W_1$): <strong style="color: #60A5FA;">${eo.timeliness_score}%</strong></span>
-                      <span>📦 Completeness ($W_2$): <strong style="color: #34D399;">${eo.completeness_score}%</strong></span>
-                      <span>💲 Price ($W_3$): <strong style="color: #FBBF24;">${eo.price_consistency_score}%</strong></span>
-                    </div>
-                    ${eo.evaluation_feedback ? `<div style="background: rgba(30, 41, 59, 0.5); padding: 8px 12px; border-radius: 6px; margin-top: 10px; font-size: 0.82rem; color: #F8FAFC; font-style: italic;">"${eo.evaluation_feedback}"</div>` : ''}
-                  </div>
-                `;
-              }).join('')}
-            </div>
-          </div>
-        `;
-      }
+      return;
     }
+
+    // SUPPLIER WITH REAL EVALUATED ORDERS - DYNAMIC AVERAGE CALCULATION
+    const count = evaluatedOrders.length;
+    const avgW1 = evaluatedOrders.reduce((sum, o) => sum + parseFloat(o.timeliness_score || 100), 0) / count;
+    const avgW2 = evaluatedOrders.reduce((sum, o) => sum + parseFloat(o.completeness_score || 100), 0) / count;
+    const avgW3 = evaluatedOrders.reduce((sum, o) => sum + parseFloat(o.price_consistency_score || 100), 0) / count;
+    const compositeScore = (avgW1 * 0.40) + (avgW2 * 0.35) + (avgW3 * 0.25);
+
+    let tierBadge = 'Tier 2 - Silver (Reliable)';
+    let badgeClass = 'badge-silver';
+    if (compositeScore >= 90) {
+      tierBadge = '⭐ Tier 1 - Gold (Preferred Vendor)';
+      badgeClass = 'badge-gold';
+    } else if (compositeScore >= 75) {
+      tierBadge = '🥈 Tier 2 - Silver (Reliable)';
+      badgeClass = 'badge-silver';
+    } else {
+      tierBadge = '⚠️ Tier 3 - Bronze (Needs Improvement)';
+      badgeClass = 'badge-critical';
+    }
+
+    container.innerHTML = `
+      <div class="card-section" style="border: 2px solid #3B82F6; background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95)); margin-bottom: 28px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 14px;">
+          <div>
+            <span class="badge badge-info" style="margin-bottom: 8px;">🎯 Gerçek Alıcı Değerlendirmeleri Ortalaması</span>
+            <h2 style="font-size: 1.5rem; font-weight: 800;">${supplierName}</h2>
+            <p style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 4px;">
+              Toplam <b>${count} adet</b> alıcı değerlendirmesinin ağırlıklı ortalamasıyla hesaplanmıştır.
+            </p>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 2.8rem; font-weight: 900; color: #60A5FA; letter-spacing: -0.04em;">
+              ${compositeScore.toFixed(1)}%
+            </div>
+            <span class="badge ${badgeClass}" style="font-size: 0.85rem; padding: 6px 14px;">${tierBadge}</span>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 20px;">
+          <div style="background: var(--bg-card); padding: 16px; border-radius: 10px; border: 1px solid var(--border-subtle);">
+            <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 6px;">
+              <span style="color: var(--text-secondary);">Ortalama Teslimat Zamanlaması ($W_1$ - %40)</span>
+              <strong style="color: #60A5FA;">${avgW1.toFixed(1)}%</strong>
+            </div>
+            <div class="progress-container">
+              <div class="progress-fill" style="width: ${avgW1}%; background-color: #3B82F6;"></div>
+            </div>
+            <span style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; display: block;">${count} değerlendirilmiş sipariş</span>
+          </div>
+
+          <div style="background: var(--bg-card); padding: 16px; border-radius: 10px; border: 1px solid var(--border-subtle);">
+            <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 6px;">
+              <span style="color: var(--text-secondary);">Ortalama Sipariş Eksiksizliği ($W_2$ - %35)</span>
+              <strong style="color: #34D399;">${avgW2.toFixed(1)}%</strong>
+            </div>
+            <div class="progress-container">
+              <div class="progress-fill" style="width: ${avgW2}%; background-color: #10B981;"></div>
+            </div>
+            <span style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; display: block;">${count} değerlendirilmiş sipariş</span>
+          </div>
+
+          <div style="background: var(--bg-card); padding: 16px; border-radius: 10px; border: 1px solid var(--border-subtle);">
+            <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 6px;">
+              <span style="color: var(--text-secondary);">Ortalama Fiyat Tutarlılığı ($W_3$ - %25)</span>
+              <strong style="color: #FBBF24;">${avgW3.toFixed(1)}%</strong>
+            </div>
+            <div class="progress-container">
+              <div class="progress-fill" style="width: ${avgW3}%; background-color: #F59E0B;"></div>
+            </div>
+            <span style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; display: block;">${count} değerlendirilmiş sipariş</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Buyer Evaluation Reviews -->
+      <div class="card-section" style="margin-top: 20px;">
+        <div class="section-header">
+          <h2>💬 Gelen Alıcı Değerlendirmeleri ve Puan Detayları (${count})</h2>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 14px;">
+          ${evaluatedOrders.map(eo => {
+            const comp = ((eo.timeliness_score * 0.40) + (eo.completeness_score * 0.35) + (eo.price_consistency_score * 0.25)).toFixed(1);
+            return `
+              <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+                  <div>
+                    <strong style="color: #60A5FA; font-size: 0.95rem;">${eo.order_number}</strong>
+                    <span style="color: var(--text-muted); font-size: 0.8rem; margin-left: 8px;">(Alıcı: ${eo.buyer_company_details ? eo.buyer_company_details.name : 'Alıcı Firma'})</span>
+                  </div>
+                  <span class="badge badge-gold" style="font-size: 0.85rem;">⭐ Puan: ${comp}%</span>
+                </div>
+                <div style="display: flex; gap: 14px; font-size: 0.78rem; color: #94A3B8; margin-top: 6px; flex-wrap: wrap;">
+                  <span>⏱️ Zamanlama ($W_1$): <strong style="color: #60A5FA;">${eo.timeliness_score}%</strong></span>
+                  <span>📦 Eksiksizlik ($W_2$): <strong style="color: #34D399;">${eo.completeness_score}%</strong></span>
+                  <span>💲 Fiyat Tutarlılığı ($W_3$): <strong style="color: #FBBF24;">${eo.price_consistency_score}%</strong></span>
+                </div>
+                ${eo.evaluation_feedback ? `<div style="background: rgba(30, 41, 59, 0.5); padding: 8px 12px; border-radius: 6px; margin-top: 10px; font-size: 0.82rem; color: #F8FAFC; font-style: italic;">"${eo.evaluation_feedback}"</div>` : ''}
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
 
     container.innerHTML = html;
   };
