@@ -1658,6 +1658,62 @@
   // -------------------------------------------------------------------------
   // 6. SUPPLIER EVALUATION (W1, W2, W3) MODAL HANDLERS
   // -------------------------------------------------------------------------
+  // 6. ORDER EVALUATION
+  // -------------------------------------------------------------------------
+  window.updateEvalSliderDisplay = function() {
+    const w1 = parseFloat(document.getElementById('evalSliderW1')?.value || 100);
+    const w2 = parseFloat(document.getElementById('evalSliderW2')?.value || 100);
+    const w3 = parseFloat(document.getElementById('evalSliderW3')?.value || 100);
+
+    const elW1 = document.getElementById('evalValW1');
+    if (elW1) elW1.innerText = `${Math.round(w1)}%`;
+
+    const elW2 = document.getElementById('evalValW2');
+    if (elW2) elW2.innerText = `${Math.round(w2)}%`;
+
+    const elW3 = document.getElementById('evalValW3');
+    if (elW3) elW3.innerText = `${Math.round(w3)}%`;
+
+    // Dynamic track gradients
+    const s1 = document.getElementById('evalSliderW1');
+    if (s1) s1.style.background = `linear-gradient(to right, #3B82F6 0%, #3B82F6 ${w1}%, #334155 ${w1}%, #334155 100%)`;
+
+    const s2 = document.getElementById('evalSliderW2');
+    if (s2) s2.style.background = `linear-gradient(to right, #10B981 0%, #10B981 ${w2}%, #334155 ${w2}%, #334155 100%)`;
+
+    const s3 = document.getElementById('evalSliderW3');
+    if (s3) s3.style.background = `linear-gradient(to right, #F59E0B 0%, #F59E0B ${w3}%, #334155 ${w3}%, #334155 100%)`;
+
+    // Composite preview
+    const composite = (w1 * 0.40) + (w2 * 0.35) + (w3 * 0.25);
+    const elComposite = document.getElementById('evalLiveCompositeScore');
+    if (elComposite) {
+      elComposite.innerText = `${composite.toFixed(1)}%`;
+    }
+
+    const elBadge = document.getElementById('evalLiveTierBadge');
+    if (elBadge) {
+      if (composite >= 90) {
+        elBadge.innerText = '⭐ Tier 1 - Preferred';
+        elBadge.className = 'badge badge-gold';
+      } else if (composite >= 75) {
+        elBadge.innerText = '🥈 Tier 2 - Reliable';
+        elBadge.className = 'badge badge-silver';
+      } else {
+        elBadge.innerText = '⚠️ Tier 3 - Needs Improvement';
+        elBadge.className = 'badge badge-critical';
+      }
+    }
+  };
+
+  window.setEvalPreset = function(sliderId, val) {
+    const slider = document.getElementById(sliderId);
+    if (slider) {
+      slider.value = val;
+      window.updateEvalSliderDisplay();
+    }
+  };
+
   window.openEvaluationModal = function(orderId) {
     const order = window.AppState.orders.find(o => o.id === orderId);
     if (!order) return;
@@ -1665,20 +1721,27 @@
     window.AppState.selectedOrderIdForEval = orderId;
 
     const elTitle = document.getElementById('evalOrderTitle');
-    if (elTitle) elTitle.innerText = `Evaluate Order: ${order.order_number}`;
+    if (elTitle) elTitle.innerText = `⭐ Puanla: ${order.order_number}`;
 
     const elSup = document.getElementById('evalSupplierName');
-    if (elSup) elSup.innerText = `Supplier: ${order.supplier_company_details ? order.supplier_company_details.name : 'Vendor'}`;
+    if (elSup) elSup.innerText = `Tedarikçi Firma: ${order.supplier_company_details ? order.supplier_company_details.name : 'Tedarikçi'}`;
 
     // Reset sliders
-    document.getElementById('evalSliderW1').value = 100;
-    document.getElementById('evalValW1').innerText = '100%';
-    document.getElementById('evalSliderW2').value = 100;
-    document.getElementById('evalValW2').innerText = '100%';
-    document.getElementById('evalSliderW3').value = 100;
-    document.getElementById('evalValW3').innerText = '100%';
-    document.getElementById('evalFeedbackNotes').value = '';
+    const initW1 = order.is_evaluated ? (order.timeliness_score || 100) : 100;
+    const initW2 = order.is_evaluated ? (order.completeness_score || 100) : 100;
+    const initW3 = order.is_evaluated ? (order.price_consistency_score || 100) : 100;
 
+    const s1 = document.getElementById('evalSliderW1');
+    if (s1) s1.value = initW1;
+    const s2 = document.getElementById('evalSliderW2');
+    if (s2) s2.value = initW2;
+    const s3 = document.getElementById('evalSliderW3');
+    if (s3) s3.value = initW3;
+
+    const feedbackEl = document.getElementById('evalFeedbackNotes');
+    if (feedbackEl) feedbackEl.value = order.evaluation_feedback || '';
+
+    window.updateEvalSliderDisplay();
     window.openModal('evaluateOrderModal');
   };
 
@@ -2679,7 +2742,7 @@
   <div class="modal-card" style="max-width: 580px;">
     <div class="modal-header" style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(30, 41, 59, 0.9));">
       <div>
-        <h3 id="evalOrderTitle" style="color: #FBBF24;">⭐ Evaluate Supplier Performance</h3>
+        <h3 id="evalOrderTitle" style="color: #FBBF24;">⭐ Tedarikçi Performansını Puanla</h3>
         <p id="evalSupplierName" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">Supplier Evaluation</p>
       </div>
       <button class="close-btn" onclick="window.closeModal('evaluateOrderModal')">&times;</button>
@@ -2687,56 +2750,91 @@
     
     <div class="modal-body" style="padding: 24px;">
       <div style="background: rgba(15, 23, 42, 0.6); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border-subtle); margin-bottom: 20px; font-size: 0.82rem; color: var(--text-secondary);">
-        Rate the supplier's fulfillment accuracy across the 3 core mathematical criteria. Your rating dynamically updates the supplier's scorecard and tier rank.
+        Sipariş teslimatını 3 temel kriter üzerinden puanlayın. Puan çubuklarını kaydırabilir veya hızlı butonları kullanabilirsiniz.
       </div>
 
       <!-- W1: Timeliness -->
-      <div style="margin-bottom: 20px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-          <label class="form-label" style="margin: 0; font-weight: 700; color: #60A5FA;">
-            ⏱️ Delivery Timeliness ($W_1$ - 40%)
+      <div class="eval-slider-group" style="border-color: rgba(59, 130, 246, 0.35);">
+        <div class="eval-slider-header">
+          <label class="eval-slider-title" style="color: #60A5FA;">
+            ⏱️ Teslimat Zamanlaması ($W_1$ - %40)
           </label>
-          <strong id="evalValW1" style="color: #60A5FA; font-size: 1.05rem;">100%</strong>
+          <strong id="evalValW1" class="eval-score-badge" style="color: #60A5FA;">100%</strong>
         </div>
-        <input type="range" id="evalSliderW1" min="0" max="100" step="5" value="100" class="form-control" style="padding: 0; height: 8px;" oninput="document.getElementById('evalValW1').innerText = this.value + '%'">
-        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 4px;">Did the supplier deliver strictly on or before the committed due date?</span>
+        <input type="range" id="evalSliderW1" min="0" max="100" step="1" value="100" class="eval-range-input" oninput="window.updateEvalSliderDisplay()">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+          <span style="font-size: 0.72rem; color: var(--text-muted);">Sipariş taahhüt edilen tarihte teslim edildi mi?</span>
+          <div class="eval-presets">
+            <button type="button" class="eval-preset-btn" onclick="window.setEvalPreset('evalSliderW1', 100)">100%</button>
+            <button type="button" class="eval-preset-btn" onclick="window.setEvalPreset('evalSliderW1', 90)">90%</button>
+            <button type="button" class="eval-preset-btn" onclick="window.setEvalPreset('evalSliderW1', 75)">75%</button>
+            <button type="button" class="eval-preset-btn" onclick="window.setEvalPreset('evalSliderW1', 50)">50%</button>
+          </div>
+        </div>
       </div>
 
       <!-- W2: Completeness -->
-      <div style="margin-bottom: 20px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-          <label class="form-label" style="margin: 0; font-weight: 700; color: #34D399;">
-            📦 Order Completeness ($W_2$ - 35%)
+      <div class="eval-slider-group" style="border-color: rgba(16, 185, 129, 0.35);">
+        <div class="eval-slider-header">
+          <label class="eval-slider-title" style="color: #34D399;">
+            📦 Sipariş Eksiksizliği ($W_2$ - %35)
           </label>
-          <strong id="evalValW2" style="color: #34D399; font-size: 1.05rem;">100%</strong>
+          <strong id="evalValW2" class="eval-score-badge" style="color: #34D399;">100%</strong>
         </div>
-        <input type="range" id="evalSliderW2" min="0" max="100" step="5" value="100" class="form-control" style="padding: 0; height: 8px;" oninput="document.getElementById('evalValW2').innerText = this.value + '%'">
-        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 4px;">Were all requested quantities delivered complete without shortages or damaged goods?</span>
+        <input type="range" id="evalSliderW2" min="0" max="100" step="1" value="100" class="eval-range-input" oninput="window.updateEvalSliderDisplay()">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+          <span style="font-size: 0.72rem; color: var(--text-muted);">Tüm adetler hatasız ve eksiksiz teslim edildi mi?</span>
+          <div class="eval-presets">
+            <button type="button" class="eval-preset-btn" onclick="window.setEvalPreset('evalSliderW2', 100)">100%</button>
+            <button type="button" class="eval-preset-btn" onclick="window.setEvalPreset('evalSliderW2', 90)">90%</button>
+            <button type="button" class="eval-preset-btn" onclick="window.setEvalPreset('evalSliderW2', 75)">75%</button>
+            <button type="button" class="eval-preset-btn" onclick="window.setEvalPreset('evalSliderW2', 50)">50%</button>
+          </div>
+        </div>
       </div>
 
       <!-- W3: Price Consistency -->
-      <div style="margin-bottom: 20px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-          <label class="form-label" style="margin: 0; font-weight: 700; color: #FBBF24;">
-            💲 Price Consistency ($W_3$ - 25%)
+      <div class="eval-slider-group" style="border-color: rgba(245, 158, 11, 0.35);">
+        <div class="eval-slider-header">
+          <label class="eval-slider-title" style="color: #FBBF24;">
+            💲 Fiyat Tutarlılığı ($W_3$ - %25)
           </label>
-          <strong id="evalValW3" style="color: #FBBF24; font-size: 1.05rem;">100%</strong>
+          <strong id="evalValW3" class="eval-score-badge" style="color: #FBBF24;">100%</strong>
         </div>
-        <input type="range" id="evalSliderW3" min="0" max="100" step="5" value="100" class="form-control" style="padding: 0; height: 8px;" oninput="document.getElementById('evalValW3').innerText = this.value + '%'">
-        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 4px;">Did invoice totals match agreed catalog pricing without unexpected price hikes?</span>
+        <input type="range" id="evalSliderW3" min="0" max="100" step="1" value="100" class="eval-range-input" oninput="window.updateEvalSliderDisplay()">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+          <span style="font-size: 0.72rem; color: var(--text-muted);">Fatura tutarı taahhüt edilen katalog fiyatına uygun mu?</span>
+          <div class="eval-presets">
+            <button type="button" class="eval-preset-btn" onclick="window.setEvalPreset('evalSliderW3', 100)">100%</button>
+            <button type="button" class="eval-preset-btn" onclick="window.setEvalPreset('evalSliderW3', 90)">90%</button>
+            <button type="button" class="eval-preset-btn" onclick="window.setEvalPreset('evalSliderW3', 75)">75%</button>
+            <button type="button" class="eval-preset-btn" onclick="window.setEvalPreset('evalSliderW3', 50)">50%</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Composite Score Preview Box -->
+      <div style="background: linear-gradient(135deg, rgba(30, 58, 138, 0.3), rgba(15, 23, 42, 0.7)); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 10px; padding: 12px 18px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <span style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 700; display: block;">Toplam Ağırlıklı Puan</span>
+          <span id="evalLiveTierBadge" class="badge badge-gold" style="margin-top: 4px; font-size: 0.75rem;">⭐ Tier 1 - Preferred</span>
+        </div>
+        <div id="evalLiveCompositeScore" style="font-size: 1.85rem; font-weight: 900; color: #FBBF24; font-family: monospace;">
+          100.0%
+        </div>
       </div>
 
       <!-- Feedback Notes -->
       <div class="form-group" style="margin-bottom: 0;">
-        <label class="form-label">Review Feedback / Performance Notes (Optional)</label>
-        <textarea id="evalFeedbackNotes" class="form-control" rows="2" placeholder="e.g. Flawless shipment, arrived 1 day ahead of schedule with perfect packaging."></textarea>
+        <label class="form-label">Değerlendirme Yorumu & Notlar (Opsiyonel)</label>
+        <textarea id="evalFeedbackNotes" class="form-control" rows="2" placeholder="Örn: Zamanında ve eksiksiz teslim edildi, ürün kalitesi mükemmel."></textarea>
       </div>
     </div>
 
     <div class="modal-footer">
-      <button type="button" class="btn btn-secondary" onclick="window.closeModal('evaluateOrderModal')">Cancel</button>
+      <button type="button" class="btn btn-secondary" onclick="window.closeModal('evaluateOrderModal')">İptal</button>
       <button type="button" class="btn btn-primary" style="background: #F59E0B; border-color: #D97706; color: black; font-weight: 700;" onclick="window.submitOrderEvaluation()">
-        ✓ Submit Rating & Update Supplier Score
+        ✓ Puanı Kaydet & Tedarikçi Skorunu Güncelle
       </button>
     </div>
   </div>
