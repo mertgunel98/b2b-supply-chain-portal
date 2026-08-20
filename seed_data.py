@@ -29,7 +29,14 @@ def run_seed():
     Category.objects.all().delete()
     UserProfile.objects.all().delete()
     Company.objects.all().delete()
-    User.objects.filter(is_superuser=False).delete()
+    User.objects.all().delete()
+
+    # 1.1 Create Superuser for Django Admin
+    admin_user = User.objects.create_superuser(
+        username="admin",
+        email="admin@b2bportal.local",
+        password="admin123"
+    )
 
     # 2. Create Companies & User Credentials
     sme = Company.objects.create(
