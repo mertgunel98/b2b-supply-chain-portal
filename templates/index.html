@@ -15,12 +15,6 @@
   <script>
   const API_BASE = '/api';
 
-  // Always require fresh login when opening the application
-  try {
-    localStorage.removeItem('portal_current_user');
-    sessionStorage.removeItem('portal_current_user');
-  } catch (e) {}
-
   window.AppState = {
     currentUser: null,
     activeTab: 'dashboard',
@@ -213,6 +207,9 @@
   };
 
   window.handleSuccessfulAuth = function(user) {
+    try {
+      localStorage.setItem('portal_current_user', JSON.stringify(user));
+    } catch (e) {}
     window.AppState.currentUser = user;
     window.showAuthOverlay(false);
     window.applyUserRoleLayout(user);
@@ -230,12 +227,43 @@
   };
 
   window.initUserSession = async function() {
-    // ALWAYS prompt for login when loading or refreshing the site
-    window.AppState.currentUser = null;
-    window.showAuthOverlay(true);
-    window.applyUserRoleLayout(null);
-    await window.loadAllData();
-    window.switchTab('dashboard');
+    let savedUser = null;
+    try {
+      const stored = localStorage.getItem('portal_current_user') || sessionStorage.getItem('portal_current_user');
+      if (stored) {
+        savedUser = JSON.parse(stored);
+      }
+    } catch (e) {}
+
+    // Verify or restore from backend session
+    if (!savedUser) {
+      try {
+        const res = await fetch(`${API_BASE}/accounts/auth/me/`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated && data.user) {
+            savedUser = data.user;
+            try {
+              localStorage.setItem('portal_current_user', JSON.stringify(savedUser));
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (savedUser) {
+      window.AppState.currentUser = savedUser;
+      window.showAuthOverlay(false);
+      window.applyUserRoleLayout(savedUser);
+      await window.loadAllData();
+      window.switchTab('dashboard');
+    } else {
+      window.AppState.currentUser = null;
+      window.showAuthOverlay(true);
+      window.applyUserRoleLayout(null);
+      await window.loadAllData();
+      window.switchTab('dashboard');
+    }
   };
 
   window.applyUserRoleLayout = function(user) {
